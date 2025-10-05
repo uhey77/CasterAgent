@@ -1,0 +1,58 @@
+[project]
+name = "ai-daily2video"
+version = "0.1.0"
+description = "Automation pipeline that turns esa AI-Daily posts into narrated videos ready for YouTube."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    { name = "AI Daily Automation" }
+]
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "openai>=1.51.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.8.2",
+    "pydantic-settings>=2.4.0",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.3",
+    "moviepy==1.0.3",
+    "imageio-ffmpeg>=0.4.2",
+    "pillow>=8.0.0,<10.0.0",
+    "google-api-python-client>=2.143.0",
+    "google-auth>=2.35.0",
+    "google-auth-oauthlib>=1.2.1",
+]
+
+[build-system]
+requires = ["setuptools>=69.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = { find = { where = ["src"] } }
+
+# [tool.uv]
+# package = "ai-daily2video"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+select = [
+    "E",
+    "F",
+    "I",
+    "N",
+    "UP",
+]
+ignore = ["E203", "E501"]
+exclude = [
+    "tests/__pycache__",
+    "**/migrations/**",
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra"
+testpaths = ["tests"]
+log_level = "INFO"
+
