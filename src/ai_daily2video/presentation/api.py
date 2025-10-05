@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from ..application.use_cases.generate_daily_video import (
@@ -15,6 +16,19 @@ from ..domain.models import PipelineError
 from .dependencies import get_pipeline_use_case
 
 router = APIRouter()
+
+
+@router.get("/")
+def root():
+    return {
+        "message": "AI Daily Video Generator API",
+        "version": "0.1.0",
+        "endpoints": {
+            "health": "/health",
+            "docs": "/docs",
+            "pipeline": "/pipeline/run"
+        }
+    }
 
 
 class PipelineRequest(BaseModel):

@@ -29,10 +29,10 @@ class OpenAIAudioService(AudioSynthesizer):
                 
             if line.text.startswith("A: "):
                 text = line.text[3:]  # "A: " を除去
-                voice = "alloy"
+                voice = "alloy"  # 女性っぽい声
             elif line.text.startswith("B: "):
                 text = line.text[3:]  # "B: " を除去
-                voice = "echo"
+                voice = "onyx"   # 男性っぽい深い声
             else:
                 text = line.text
                 voice = "alloy"  # デフォルト

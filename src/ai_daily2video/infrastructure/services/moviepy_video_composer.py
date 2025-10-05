@@ -53,7 +53,7 @@ class MoviePyVideoComposer(VideoComposer):
         return VideoAsset(article_id=audio.article_id, file_path=output_path, duration_seconds=duration)
 
     def _build_subtitle_clips(self, segments: List[SubtitleSegment], duration: float):
-        font_path = str(self._settings.default_font_path) if self._settings.default_font_path else "Arial"
+        # フォントを指定しない（システムデフォルトを使用）
         clips = []
         for segment in segments:
             start = max(segment.start_seconds, 0.0)
@@ -61,19 +61,23 @@ class MoviePyVideoComposer(VideoComposer):
             if start >= end:
                 continue
             text = segment.text.replace("\n", " ")
-            clip = (
-                TextClip(
-                    text,
-                    fontsize=60,
-                    font=font_path,
-                    color="white",
-                    method="caption",
-                    size=(1600, None),
+            try:
+                clip = (
+                    TextClip(
+                        text,
+                        fontsize=50,
+                        color="white",
+                        method="caption",
+                        size=(1600, None),
+                    )
+                    .on_color(size=(1920, 160), color=(0, 0, 0), col_opacity=0.7)
+                    .set_position(("center", 820))
+                    .set_start(start)
+                    .set_end(end)
                 )
-                .on_color(size=(1920, 160), color=(0, 0, 0), col_opacity=0.55)
-                .set_position(("center", 820))
-                .set_start(start)
-                .set_end(end)
-            )
-            clips.append(clip)
+                clips.append(clip)
+            except Exception as e:
+                # フォントエラーの場合はスキップして続行
+                print(f"字幕作成エラー: {text[:20]}... - {e}")
+                continue
         return clips
