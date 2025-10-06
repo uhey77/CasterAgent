@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 from datetime import datetime
 
 from ...core.openai_client import get_openai_client
@@ -12,19 +12,47 @@ from ...domain.interfaces import MetadataGenerator, ScriptGenerator
 from ...domain.models import Article, Script, ScriptLine, VideoMetadata
 
 SCRIPT_SYSTEM_PROMPT = (
-    "あなたはAIニュースを魅力的に伝える映像脚本家です。"
+    "あなたはAIニュースを魅力的に伝える映像脚本家です。\n"
     "視聴者にとって分かりやすく、学びのある会話を日本語で作ってください。"
 )
 
 SCRIPT_USER_TEMPLATE = """
-以下はesaで公開されたAIニュース記事です。内容を要約しつつ2人のキャラクターが丁寧に説明する台本を作成してください。
+以下はesaで公開されたAIニュース記事です。記事に記載されている**全ての研究項目（14項目全て）**を漏れなく網羅して、2人のキャラクターが項目別に整理した台本を作成してください。
+
+# 動画構成（必須）
+1. オープニング: 挨拶と日付({date_str})、今日のハイライト概要
+2. 詳細なチャプター一覧: 記事に含まれる**全14項目**を番号付きで詳しく紹介（最低60秒間）
+3. 各項目の詳細解説: **全14項目**を順番に詳しく解説（著者名、所属、数値、DOI含む）
+4. クロージング: 全体のまとめと今後の展望
+
+# 重要な指示（厳守）
+- 記事の**全14項目**を必ず含めてください：
+  * XAI分野：4項目（AD、EDCT、TextCAM、EAP-IG）
+  * LLM/エージェント分野：4項目（UpSafe°C、RLAD、bBoN、Executable Counterfactuals）
+  * 生成AI分野：1項目（Temporal Score Rescaling）
+  * Science/Nature：2項目（DNA合成セキュリティ、HuDiff）
+  * Xウォッチ：3項目（RLAD、bBoN、Executable Counterfactals）
+- 各項目について著者名、所属機関、DOI、具体的数値を全て含めてください
+- 記事の「📌 本日のハイライト」も必ず言及してください
+- 専門用語や略語の説明も含めてください
+
+# チャプター一覧の読み上げルール（重要）
+- 「今日のトピックは全部で◯◯項目あります」と明言してください
+- 各分野ごとにグループ化して紹介してください
+- 「XAI分野では4つの研究、LLM/エージェント分野では4つの研究...」という形で構造化してください
+- チャプター一覧だけで最低20-25行の台詞を作ってください
+- 各項目の短い説明（1-2文）も含めてください
+
+# 各項目の詳細説明ルール
+- 各項目は「それでは○つ目の【正確な論文タイトル】について詳しく見ていきましょう」で開始
+- 著者名、所属、投稿日、DOI、URLを必ず含める
+- 研究の背景、手法、実験結果、具体的数値、意義を全て含める
+- 1つの項目につき最低8-12行の詳細説明を作る
 
 # 出力ルール
 - スピーカーはAとBの2名だけに限定してください
 - 各台詞は「A: ...」「B: ...」形式で1行ずつ記述してください
-- 導入部でニュースの概要、続いて重要ポイント、最後に今後の展望を語ってください
-- 完結した会話にしてください
-- 日付は{date_str}として参照してください
+- 最終的に100行以上の大容量台本を作成してください
 
 # 記事情報
 - 記事タイトル: {title}
