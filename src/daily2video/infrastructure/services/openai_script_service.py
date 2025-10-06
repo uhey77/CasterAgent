@@ -95,7 +95,7 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
         date_str = self._format_date(article.published_at)
         
         response = self._client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.5,
             max_tokens=2000,
             messages=[
@@ -120,7 +120,7 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
         date_str = self._format_date(article.published_at)
         
         response = self._client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             temperature=0.2,
             max_tokens=800,
             messages=[
