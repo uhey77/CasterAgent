@@ -5,11 +5,11 @@ from typing import Iterable, Optional
 
 import pytest
 
-from ai_daily2video.application.use_cases.generate_daily_video import (
+from daily2video.application.use_cases.generate_daily_video import (
     GenerateDailyVideo,
     GenerateDailyVideoInput,
 )
-from ai_daily2video.domain.interfaces import (
+from daily2video.domain.interfaces import (
     ArticleRepository,
     AudioSynthesizer,
     BackgroundImageGenerator,
@@ -21,7 +21,7 @@ from ai_daily2video.domain.interfaces import (
     VideoComposer,
     VideoPublisher,
 )
-from ai_daily2video.domain.models import (
+from daily2video.domain.models import (
     Article,
     AudioAsset,
     GeneratedImage,

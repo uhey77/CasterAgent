@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import uvicorn
 
-from ai_daily2video.app import app, create_app
-from ai_daily2video.core.settings import get_settings
+from daily2video.app import app, create_app
+from daily2video.core.settings import get_settings
 
 
 def main() -> None:
