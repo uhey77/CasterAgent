@@ -13,7 +13,7 @@ wheels/
 .env
 .env.*
 python.env
-casteragent-*.json
+credentials/
 
 # Generated artifacts
 .data/
