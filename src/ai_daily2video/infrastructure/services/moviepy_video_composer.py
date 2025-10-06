@@ -23,12 +23,15 @@ class MoviePyVideoComposer(VideoComposer):
 
         audio_clip = AudioFileClip(str(audio.file_path))
         duration = audio_clip.duration
+        
+        # 16:9アスペクト比（1920x1080）に強制変更
         image_clip = (
             ImageClip(str(background.file_path))
             .set_duration(duration)
-            .resize(height=1080)
+            .resize((1920, 1080))  # 横長サイズに強制変更
             .set_position("center")
         )
+        
         subtitle_clips = self._build_subtitle_clips(subtitles.segments, duration)
         video_clip = CompositeVideoClip([image_clip] + subtitle_clips)
         final_clip = video_clip.set_audio(audio_clip)
@@ -96,10 +99,10 @@ class MoviePyVideoComposer(VideoComposer):
                         font=selected_font,
                         color="white",
                         method="caption",
-                        size=(1600, None),
+                        size=(1600, None),  # 横幅を1600に設定（1920より少し小さく）
                     )
                     .on_color(
-                        size=(1920, 200),
+                        size=(1920, 200),  # 背景は1920幅に合わせる
                         color=(0, 0, 0),
                         col_opacity=0.8
                     )

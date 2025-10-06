@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from typing import List
+from datetime import datetime
 
 from ...core.openai_client import get_openai_client
 from ...core.settings import get_settings
@@ -23,9 +24,11 @@ SCRIPT_USER_TEMPLATE = """
 - 各台詞は「A: ...」「B: ...」形式で1行ずつ記述してください
 - 導入部でニュースの概要、続いて重要ポイント、最後に今後の展望を語ってください
 - 完結した会話にしてください
+- 日付は{date_str}として参照してください
 
-# 記事タイトル
-{title}
+# 記事情報
+- 記事タイトル: {title}
+- 公開日: {date_str}
 
 # 記事本文（Markdown）
 {body}
@@ -38,8 +41,9 @@ METADATA_SYSTEM_PROMPT = (
 METADATA_USER_TEMPLATE = """
 以下のニュース記事と台本を参考に、YouTube動画のメタデータをJSON形式で作成してください。
 
-# 記事タイトル
-{title}
+# 記事情報
+- 記事タイトル: {title}
+- 公開日: {date_str}
 
 # 台本
 {script}
@@ -47,6 +51,7 @@ METADATA_USER_TEMPLATE = """
 # 要件
 - JSONオブジェクトを返してください
 - `title`, `description`, `tags`(配列), `category_id`(文字列), `privacy_status`(public|unlisted|private) を含めてください
+- タイトルには{date_str}の日付を含めてください
 - 説明文には記事の出典URLを含めてください（URLが分からない場合は省略）
 - タグは最大10個、日本語で短くしてください
 - 説明文は500文字以内を目安に自然な日本語でまとめてください
@@ -59,6 +64,8 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
         self._settings = get_settings()
 
     def build_script(self, article: Article) -> Script:
+        date_str = self._format_date(article.published_at)
+        
         response = self._client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0.5,
@@ -70,6 +77,7 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
                     "content": SCRIPT_USER_TEMPLATE.format(
                         title=article.title,
                         body=article.markdown_body,
+                        date_str=date_str,
                     ),
                 },
             ],
@@ -81,6 +89,8 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
         return script
 
     def build_metadata(self, article: Article, script: Script) -> VideoMetadata:
+        date_str = self._format_date(article.published_at)
+        
         response = self._client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0.2,
@@ -92,6 +102,7 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
                     "content": METADATA_USER_TEMPLATE.format(
                         title=article.title,
                         script=script.raw_text,
+                        date_str=date_str,
                     ),
                 },
             ],
@@ -104,7 +115,7 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
             tags = []
         metadata = VideoMetadata(
             article_id=article.article_id,
-            title=payload.get("title", article.title),
+            title=payload.get("title", f"{article.title} - {date_str}"),
             description=payload.get("description", article.markdown_body[:4000]),
             tags=tags,
             category_id=str(payload.get("category_id", "28")),
@@ -152,3 +163,10 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
         path = self._settings.storage.scripts_dir / f"{script.article_id}.txt"
         path.write_text(script.raw_text, encoding="utf-8")
         return path
+
+    def _format_date(self, published_at: datetime | None) -> str:
+        """記事の日付を日本語形式でフォーマット"""
+        if published_at:
+            return published_at.strftime("%Y年%m月%d日")
+        else:
+            return datetime.now().strftime("%Y年%m月%d日")
