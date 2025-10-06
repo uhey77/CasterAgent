@@ -22,6 +22,7 @@ dependencies = [
     "google-api-python-client>=2.143.0",
     "google-auth>=2.35.0",
     "google-auth-oauthlib>=1.2.1",
+    "pytest>=8.4.2",
 ]
 
 [build-system]

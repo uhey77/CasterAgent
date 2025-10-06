@@ -95,9 +95,9 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
         date_str = self._format_date(article.published_at)
         
         response = self._client.chat.completions.create(
-            model="gpt-5-mini",
-            temperature=0.5,
-            max_tokens=2000,
+            model="gpt-4o-mini",
+            temperature=0.3,
+            # max_tokens=5000,
             messages=[
                 {"role": "system", "content": SCRIPT_SYSTEM_PROMPT},
                 {
@@ -120,9 +120,9 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
         date_str = self._format_date(article.published_at)
         
         response = self._client.chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             temperature=0.2,
-            max_tokens=800,
+            # max_tokens=800,
             messages=[
                 {"role": "system", "content": METADATA_SYSTEM_PROMPT},
                 {
@@ -154,14 +154,27 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
 
     @staticmethod
     def _parse_script(raw: str) -> List[ScriptLine]:
+        cleaned = raw.strip()
+        if cleaned.startswith("```") and cleaned.endswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1].rsplit("\n", 1)[0]
+
         pattern = re.compile(r"^(?P<speaker>A|B)[：:]\s*(?P<line>.+)$")
         lines: List[ScriptLine] = []
-        for line in raw.splitlines():
-            match = pattern.match(line.strip())
+        for line in cleaned.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            match = pattern.match(stripped)
             if match:
                 lines.append(ScriptLine(speaker=match.group("speaker"), text=match.group("line")))
+            elif lines:
+                existing = lines[-1].text
+                lines[-1].text = f"{existing}\n{stripped}" if existing else stripped
+            else:
+                lines.append(ScriptLine(speaker="ナレーター", text=stripped))
+
         if not lines:
-            lines.append(ScriptLine(speaker="ナレーター", text=raw.strip()))
+            lines.append(ScriptLine(speaker="ナレーター", text=cleaned))
         return lines
 
     @staticmethod
