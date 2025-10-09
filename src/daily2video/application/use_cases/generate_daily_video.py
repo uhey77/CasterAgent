@@ -17,6 +17,7 @@ from ...domain.interfaces import (
     VideoPublisher,
 )
 from ...domain.models import (
+    Article,
     PipelineError,
     PipelineStatus,
     VideoAsset,
@@ -94,12 +95,29 @@ class GenerateDailyVideo:
             status.status = "video_ready"
             self._logger.log({"event": "video_composed", "file_path": str(video.file_path)})
 
-            youtube_video_id = self._publisher.publish(video, metadata)
-            if youtube_video_id:
-                status.status = "uploaded"
-                self._logger.log({"event": "video_uploaded", "youtube_id": youtube_video_id})
+            should_upload = self._should_upload_video(article)
+            youtube_video_id = None
+
+            if should_upload:
+                youtube_video_id = self._publisher.publish(video, metadata)
+                if youtube_video_id:
+                    status.status = "uploaded"
+                    self._logger.log({"event": "video_uploaded", "youtube_id": youtube_video_id})
+                else:
+                    status.status = "video_saved"
             else:
                 status.status = "video_saved"
+                self._logger.log(
+                    {
+                        "event": "upload_skipped",
+                        "reason": "article_date_mismatch",
+                        "article_id": article.article_id,
+                        "article_published_at": (
+                            article.published_at.isoformat() if article.published_at else None
+                        ),
+                    }
+                )
+                status.notes.append("YouTubeアップロードはESA記事の日付不一致のためスキップされました")
 
             status.completed_at = datetime.utcnow()
             self._notifier.notify("AI-Daily動画の自動生成が完了しました", extra={"status": status.status})
@@ -121,3 +139,12 @@ class GenerateDailyVideo:
         if not article:
             raise PipelineError("article", "対象の記事が見つかりませんでした")
         return article
+
+    def _should_upload_video(self, article: Article) -> bool:
+        """ESAの記事日付が当日と一致するときだけアップロードを許可"""
+        if not article or not article.published_at:
+            return False
+
+        published_date = article.published_at.date()
+        current_date = datetime.now(article.published_at.tzinfo).date() if article.published_at.tzinfo else datetime.utcnow().date()
+        return published_date == current_date
