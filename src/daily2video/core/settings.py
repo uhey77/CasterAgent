@@ -47,8 +47,12 @@ class StoragePaths(BaseModel):
             child.mkdir(parents=True, exist_ok=True)
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+ENV_FILE = PROJECT_ROOT / ".env"
+
+
 class AppSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
     esa_api_token: str = Field(default="")
     esa_team: str = Field(default="")
