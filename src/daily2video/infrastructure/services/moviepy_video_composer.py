@@ -210,6 +210,9 @@ class MoviePyVideoComposer(VideoComposer):
         try:
             # 表示時間: 冒頭12秒
             display_duration = min(12.0, duration)
+            subtitle_safe_area = 240
+            y_offset = 80
+            available_height = max(200, int(1080 - y_offset - subtitle_safe_area))
             
             # FFmpegコマンドを構築
             cmd = [
@@ -217,7 +220,7 @@ class MoviePyVideoComposer(VideoComposer):
                 '-i', str(input_video),
                 '-i', str(topic_image),
                 '-filter_complex',
-                f"[0:v][1:v] overlay=0:0:enable='between(t,0,{display_duration})'",
+                f"[1:v] scale=1920:{available_height}:force_original_aspect_ratio=decrease [topic]; [0:v][topic] overlay=(main_w-overlay_w)/2:{y_offset}:enable='between(t,0,{display_duration})'",
                 '-c:a', 'copy',  # 音声は再エンコードせずコピー
                 '-y',  # 上書き
                 str(output_video)
