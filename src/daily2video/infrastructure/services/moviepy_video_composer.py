@@ -69,10 +69,18 @@ class MoviePyVideoComposer(VideoComposer):
         # トピックリスト画像を生成
         script_text = self._load_script_text(audio.article_id)
         topic_image_path = self._create_topic_list_image(audio.article_id, script_text)
+        overlay_start, overlay_end = self._calculate_topic_overlay_window(subtitles.segments, duration)
         
         # FFmpegでトピック画像をオーバーレイ
         if topic_image_path and topic_image_path.exists():
-            self._overlay_topic_image_with_ffmpeg(temp_output_path, topic_image_path, final_output_path, duration)
+            self._overlay_topic_image_with_ffmpeg(
+                temp_output_path,
+                topic_image_path,
+                final_output_path,
+                duration,
+                overlay_start,
+                overlay_end,
+            )
             # 一時ファイルを削除
             temp_output_path.unlink()
         else:
@@ -199,17 +207,63 @@ class MoviePyVideoComposer(VideoComposer):
             traceback.print_exc()
             return None
 
+    def _calculate_topic_overlay_window(
+        self,
+        segments: List[SubtitleSegment],
+        total_duration: float,
+    ) -> tuple[float, float]:
+        """今日のトピック紹介の開始・終了タイミングを推定"""
+        start_keywords = [
+            "今日のトピック",
+            "本日のトピック",
+            "今日の議題",
+            "本日の議題",
+        ]
+        end_keywords = [
+            "詳細解説",
+            "詳しく見ていきましょう",
+            "解説に移りましょう",
+            "詳細を見ていきましょう",
+        ]
+
+        overlay_start: Optional[float] = None
+        overlay_end: Optional[float] = None
+
+        for segment in segments:
+            normalized = segment.text.replace("\n", "").replace(" ", "").replace("　", "")
+
+            if overlay_start is None and any(keyword in normalized for keyword in start_keywords):
+                overlay_start = segment.start_seconds
+
+            if overlay_start is not None and any(keyword in normalized for keyword in end_keywords):
+                overlay_end = segment.end_seconds
+                break
+
+        if overlay_start is None:
+            overlay_start = 0.0
+
+        if overlay_end is None:
+            overlay_end = min(total_duration, overlay_start + 12.0)
+
+        if overlay_end < overlay_start:
+            overlay_end = overlay_start
+
+        return overlay_start, overlay_end
+
     def _overlay_topic_image_with_ffmpeg(
         self,
         input_video: Path,
         topic_image: Path,
         output_video: Path,
         duration: float,
+        overlay_start: float,
+        overlay_end: float,
     ) -> None:
         """FFmpegでトピック画像を動画の冒頭にオーバーレイ"""
         try:
-            # 表示時間: 冒頭12秒
-            display_duration = min(12.0, duration)
+            # 表示時間と字幕を避ける位置を設定
+            overlay_start = max(0.0, min(duration, overlay_start))
+            overlay_end = max(overlay_start, min(duration, overlay_end))
             subtitle_safe_area = 240
             y_offset = 80
             available_height = max(200, int(1080 - y_offset - subtitle_safe_area))
@@ -220,7 +274,8 @@ class MoviePyVideoComposer(VideoComposer):
                 '-i', str(input_video),
                 '-i', str(topic_image),
                 '-filter_complex',
-                f"[1:v] scale=1920:{available_height}:force_original_aspect_ratio=decrease [topic]; [0:v][topic] overlay=(main_w-overlay_w)/2:{y_offset}:enable='between(t,0,{display_duration})'",
+                f"[1:v] scale=1920:{available_height}:force_original_aspect_ratio=decrease [topic]; "
+                f"[0:v][topic] overlay=(main_w-overlay_w)/2:{y_offset}:enable='between(t,{overlay_start},{overlay_end})'",
                 '-c:a', 'copy',  # 音声は再エンコードせずコピー
                 '-y',  # 上書き
                 str(output_video)
