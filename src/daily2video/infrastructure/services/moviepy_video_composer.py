@@ -212,18 +212,20 @@ class MoviePyVideoComposer(VideoComposer):
         segments: List[SubtitleSegment],
         total_duration: float,
     ) -> tuple[float, float]:
-        """今日のトピック紹介の開始・終了タイミングを推定"""
+        """挨拶後のハイライト紹介から最初の項目へ入るまでの時間を推定"""
         start_keywords = [
-            "今日のトピック",
-            "本日のトピック",
-            "今日の議題",
-            "本日の議題",
+            "ハイライト",
+            "今日のハイライト",
+            "本日のハイライト",
         ]
         end_keywords = [
-            "詳細解説",
-            "詳しく見ていきましょう",
-            "解説に移りましょう",
-            "詳細を見ていきましょう",
+            "今日のトピック",
+            "本日のトピック",
+            "項目あります",
+            "分野では",
+            "最初の研究",
+            "1つ目",
+            "一つ目",
         ]
 
         overlay_start: Optional[float] = None
@@ -235,9 +237,14 @@ class MoviePyVideoComposer(VideoComposer):
             if overlay_start is None and any(keyword in normalized for keyword in start_keywords):
                 overlay_start = segment.start_seconds
 
-            if overlay_start is not None and any(keyword in normalized for keyword in end_keywords):
-                overlay_end = segment.end_seconds
-                break
+            if overlay_start is not None:
+                if any(keyword in normalized for keyword in end_keywords):
+                    overlay_end = segment.start_seconds
+                    break
+                # 番号付きの最初の項目っぽい発話を検出
+                if normalized.startswith("1") or normalized.startswith("１"):
+                    overlay_end = segment.start_seconds
+                    break
 
         if overlay_start is None:
             overlay_start = 0.0
