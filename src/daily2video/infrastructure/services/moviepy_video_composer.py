@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 import subprocess
+import math
 from typing import List, Tuple, Optional
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -146,7 +147,6 @@ class MoviePyVideoComposer(VideoComposer):
             try:
                 title_font = ImageFont.truetype(font_path, 70)
                 number_font = ImageFont.truetype(font_path, 42)
-                category_font = ImageFont.truetype(font_path, 32)
                 text_font = ImageFont.truetype(font_path, 36)
             except Exception as e:
                 print(f"フォント読み込みエラー: {e}")
@@ -156,32 +156,35 @@ class MoviePyVideoComposer(VideoComposer):
             title_text = f"本日のトピック（全{len(research_items)}項目）"
             draw.text((100, 60), title_text, font=title_font, fill=(31, 42, 68))
 
-            # 2カラムレイアウトで項目を表示
-            y_offset = 160
-            x_left = 100
-            x_right = 960
-            line_height = 65
+            # 2カラムレイアウトで項目を表示（縦に並べた後に次のカラムへ）
+            column_count = 2
+            column_width = 720
+            column_x_positions = [100, 980]
+            start_y = 220
+            base_line_spacing = 20
 
-            for idx, (category, title) in enumerate(research_items, 1):
-                # 奇数は左カラム、偶数は右カラム
-                x_pos = x_left if idx % 2 == 1 else x_right
+            items_per_column = math.ceil(len(research_items) / column_count)
+            for col_idx in range(column_count):
+                start_index_col = col_idx * items_per_column
+                end_index_col = min(start_index_col + items_per_column, len(research_items))
+                column_items = research_items[start_index_col:end_index_col]
+                current_y = start_y
 
-                # 番号
-                draw.text((x_pos, y_offset), f"{idx}.", font=number_font, fill=(30, 136, 229))
+                for row_idx, (_, title) in enumerate(column_items):
+                    item_index = start_index_col + row_idx + 1
 
-                # 分野タグ（あれば）
-                text_x_offset = x_pos + 50
-                if category:
-                    draw.text((text_x_offset, y_offset + 2), f"[{category}]", font=category_font, fill=(255, 107, 107))
-                    text_x_offset += 150
+                    draw.text((column_x_positions[col_idx], current_y), f"{item_index}.", font=number_font, fill=(30, 136, 229))
 
-                # タイトル（長い場合は短縮）
-                display_title = self._truncate_title(title, 22)
-                draw.text((text_x_offset, y_offset), display_title, font=text_font, fill=(33, 33, 33))
+                    text_x = column_x_positions[col_idx] + 60
+                    wrapped_lines = self._wrap_text(title, text_font, column_width)
+                    line_height = text_font.size + 10
 
-                # 偶数番号の後に次の行へ
-                if idx % 2 == 0:
-                    y_offset += line_height
+                    for line_idx, line in enumerate(wrapped_lines):
+                        draw.text((text_x, current_y + line_idx * line_height), line, font=text_font, fill=(33, 33, 33))
+
+                    item_height = max(number_font.size, len(wrapped_lines) * line_height)
+                    current_y += item_height + base_line_spacing
+
 
             # 画像を保存
             output_path = self._settings.storage.images_dir / f"{article_id}_topics.png"
@@ -326,11 +329,32 @@ class MoviePyVideoComposer(VideoComposer):
         
         return ""
 
-    def _truncate_title(self, title: str, max_length: int) -> str:
-        """タイトルが長い場合は短縮"""
-        if len(title) <= max_length:
-            return title
-        return title[:max_length] + "..."
+    def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
+        """指定幅に収まるようテキストを改行"""
+        lines: List[str] = []
+        current_line = ""
+
+        for char in text:
+            tentative = current_line + char
+            if self._measure_text(tentative, font) <= max_width:
+                current_line = tentative
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = char
+
+        if current_line:
+            lines.append(current_line)
+
+        return lines or [""]
+
+    def _measure_text(self, text: str, font: ImageFont.FreeTypeFont) -> float:
+        """フォントでの描画幅を取得"""
+        try:
+            return font.getlength(text)
+        except AttributeError:
+            bbox = font.getbbox(text)
+            return bbox[2] - bbox[0]
 
     def _load_script_text(self, article_id: int) -> Optional[str]:
         script_path = self._settings.storage.scripts_dir / f"{article_id}.txt"
