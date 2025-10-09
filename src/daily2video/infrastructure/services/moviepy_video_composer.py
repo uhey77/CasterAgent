@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import subprocess
 from typing import List, Tuple, Optional
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 
@@ -23,7 +25,8 @@ class MoviePyVideoComposer(VideoComposer):
         subtitles: SubtitleFile,
         background: GeneratedImage,
     ) -> VideoAsset:
-        output_path = self._settings.storage.videos_dir / f"{audio.article_id}.mp4"
+        temp_output_path = self._settings.storage.videos_dir / f"{audio.article_id}_temp.mp4"
+        final_output_path = self._settings.storage.videos_dir / f"{audio.article_id}.mp4"
 
         audio_clip = AudioFileClip(str(audio.file_path))
         duration = audio_clip.duration
@@ -36,24 +39,23 @@ class MoviePyVideoComposer(VideoComposer):
             .set_position("center")
         )
         
-        # トピックリスト画面とオーバーレイクリップを生成
+        # 字幕クリップを生成
         subtitle_clips = self._build_subtitle_clips(subtitles.segments, duration)
-        script_text = self._load_script_text(audio.article_id)
-        topic_overlay_clips = self._build_topic_list_overlay(script_text, duration)
         
-        # 全てのクリップを合成
-        all_clips = [image_clip] + subtitle_clips + topic_overlay_clips
+        # 全てのクリップを合成（トピックリストはFFmpegで後から追加）
+        all_clips = [image_clip] + subtitle_clips
         video_clip = CompositeVideoClip(all_clips)
         final_clip = video_clip.set_audio(audio_clip)
 
+        # まず一時ファイルとして動画を生成
         final_clip.write_videofile(
-            str(output_path),
+            str(temp_output_path),
             codec="libx264",
             audio_codec="aac",
             fps=30,
             bitrate="4000k",
             threads=4,
-            temp_audiofile=str(output_path.with_suffix(".temp.m4a")),
+            temp_audiofile=str(temp_output_path.with_suffix(".temp.m4a")),
             remove_temp=True,
         )
 
@@ -62,10 +64,21 @@ class MoviePyVideoComposer(VideoComposer):
         final_clip.close()
         for clip in subtitle_clips:
             clip.close()
-        for clip in topic_overlay_clips:
-            clip.close()
 
-        return VideoAsset(article_id=audio.article_id, file_path=output_path, duration_seconds=duration)
+        # トピックリスト画像を生成
+        script_text = self._load_script_text(audio.article_id)
+        topic_image_path = self._create_topic_list_image(audio.article_id, script_text)
+        
+        # FFmpegでトピック画像をオーバーレイ
+        if topic_image_path and topic_image_path.exists():
+            self._overlay_topic_image_with_ffmpeg(temp_output_path, topic_image_path, final_output_path, duration)
+            # 一時ファイルを削除
+            temp_output_path.unlink()
+        else:
+            # トピック画像がない場合は一時ファイルをリネーム
+            temp_output_path.rename(final_output_path)
+
+        return VideoAsset(article_id=audio.article_id, file_path=final_output_path, duration_seconds=duration)
 
     def _build_subtitle_clips(self, segments: List[SubtitleSegment], duration: float):
         clips = []
@@ -111,18 +124,18 @@ class MoviePyVideoComposer(VideoComposer):
         print(f"作成した字幕クリップ数: {len(clips)}")
         return clips
 
-    def _build_topic_list_overlay(
+    def _create_topic_list_image(
         self,
+        article_id: int,
         script_text: Optional[str],
-        duration: float,
-    ):
-        """Pillowを使ってトピックリスト画像を生成し、動画冒頭にオーバーレイ"""
+    ) -> Optional[Path]:
+        """Pillowを使ってトピックリスト画像を生成"""
         try:
             # 研究項目を抽出
             research_items = self._extract_research_items(script_text)
             if not research_items:
                 print("研究項目が抽出できませんでした")
-                return []
+                return None
 
             # Pillowで画像を生成
             img = Image.new('RGBA', (1920, 1080), (255, 255, 255, 242))  # 半透明の白背景
@@ -137,7 +150,7 @@ class MoviePyVideoComposer(VideoComposer):
                 text_font = ImageFont.truetype(font_path, 36)
             except Exception as e:
                 print(f"フォント読み込みエラー: {e}")
-                return []
+                return None
 
             # タイトルを描画
             title_text = f"本日のトピック（全{len(research_items)}項目）"
@@ -170,37 +183,66 @@ class MoviePyVideoComposer(VideoComposer):
                 if idx % 2 == 0:
                     y_offset += line_height
 
-            # Pillowの画像をnumpy配列に変換
-            img_array = np.array(img)
+            # 画像を保存
+            output_path = self._settings.storage.images_dir / f"{article_id}_topics.png"
+            img.save(str(output_path))
 
-            # ImageClipとして作成
-            display_duration = 12.0
-            display_end = min(display_duration, duration)
-            
-            topic_clip = (
-                ImageClip(img_array)
-                .set_duration(display_end)
-                .set_position("center")
-                .set_start(0)
-            )
-
-            print(f"トピックリスト作成成功: {len(research_items)}項目")
-            return [topic_clip]
+            print(f"トピックリスト画像作成成功: {output_path}")
+            return output_path
 
         except Exception as exc:
-            print(f"トピックリスト作成エラー: {exc}")
+            print(f"トピックリスト画像作成エラー: {exc}")
             import traceback
             traceback.print_exc()
-            return []
+            return None
 
-    def _build_chapter_overlay_clips(
+    def _overlay_topic_image_with_ffmpeg(
         self,
-        segments: List[SubtitleSegment],
+        input_video: Path,
+        topic_image: Path,
+        output_video: Path,
         duration: float,
-        script_text: Optional[str],
-    ):
-        """互換性のため残しているが、_build_topic_list_overlayを使用"""
-        return []
+    ) -> None:
+        """FFmpegでトピック画像を動画の冒頭にオーバーレイ"""
+        try:
+            # 表示時間: 冒頭12秒
+            display_duration = min(12.0, duration)
+            
+            # FFmpegコマンドを構築
+            cmd = [
+                'ffmpeg',
+                '-i', str(input_video),
+                '-i', str(topic_image),
+                '-filter_complex',
+                f"[0:v][1:v] overlay=0:0:enable='between(t,0,{display_duration})'",
+                '-c:a', 'copy',  # 音声は再エンコードせずコピー
+                '-y',  # 上書き
+                str(output_video)
+            ]
+            
+            print(f"FFmpegでトピック画像をオーバーレイ中...")
+            print(f"コマンド: {' '.join(cmd)}")
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            print(f"トピック画像のオーバーレイ完了: {output_video}")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"FFmpegエラー: {e}")
+            print(f"stdout: {e.stdout}")
+            print(f"stderr: {e.stderr}")
+            # エラーの場合は元の動画をコピー
+            import shutil
+            shutil.copy(str(input_video), str(output_video))
+        except Exception as e:
+            print(f"オーバーレイエラー: {e}")
+            import shutil
+            shutil.copy(str(input_video), str(output_video))
 
     def _extract_research_items(self, script_text: Optional[str]) -> List[Tuple[str, str]]:
         """スクリプトから研究項目を抽出（分野とタイトル）"""
@@ -210,10 +252,16 @@ class MoviePyVideoComposer(VideoComposer):
         items: List[Tuple[str, str]] = []
         seen: set[str] = set()
         
-        # **タイトル** 形式（Markdownボールド）を抽出
+        # 「タイトル」形式（日本語鍵括弧）と **タイトル** 形式（Markdownボールド）の両方を抽出
         for line in script_text.splitlines():
-            # **で囲まれた部分を探す
-            matches = re.findall(r"\*\*([^*]+)\*\*", line)
+            # 「」で囲まれた部分を探す
+            matches_jp = re.findall(r"「([^」]+)」", line)
+            # **で囲まれた部分も探す
+            matches_md = re.findall(r"\*\*([^*]+)\*\*", line)
+            
+            # 両方のマッチを統合
+            matches = matches_jp + matches_md
+            
             for match in matches:
                 title = match.strip()
                 
@@ -222,8 +270,12 @@ class MoviePyVideoComposer(VideoComposer):
                     continue
                 
                 # よくある一般的なフレーズは除外
-                skip_phrases = ["AI Daily", "こちら", "まず", "次に", "最後に", "さらに"]
-                if any(phrase in title for phrase in skip_phrases):
+                skip_phrases = [
+                    "AI Daily", "こちら", "まず", "次に", "最後に", "さらに",
+                    "Bridge", "GRPO", "M2PO", "HuDiff"  # ハイライト部分の短縮形は除外
+                ]
+                # ただし、長いタイトル（括弧付き等）は含める
+                if any(phrase == title for phrase in skip_phrases):
                     continue
                 
                 # 分野を判定
