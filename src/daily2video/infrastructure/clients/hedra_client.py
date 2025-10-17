@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -156,12 +157,20 @@ class HedraClient:
     # Download helpers
     # --------------------------------------------------------------------- #
     def download_asset(self, url: str, target_path: Path) -> None:
-        response = requests.get(
-            url,
-            headers=self._auth_headers(),
-            stream=True,
-            timeout=120,
-        )
+        parsed = urlparse(url)
+        query_raw = parsed.query
+        query = {key.lower(): value for key, value in parse_qs(query_raw).items()}
+        signed_query_keys = {
+            "x-amz-algorithm",
+            "x-amz-signature",
+            "x-amz-credential",
+            "x-amz-security-token",
+            "awsaccesskeyid",
+            "signature",
+        }
+        use_auth_headers = not any(key in query for key in signed_query_keys)
+        headers = self._auth_headers() if use_auth_headers else None
+        response = requests.get(url, headers=headers, stream=True, timeout=120)
         self._raise_for_status(response)
         with target_path.open("wb") as handle:
             for chunk in response.iter_content(chunk_size=8192):
