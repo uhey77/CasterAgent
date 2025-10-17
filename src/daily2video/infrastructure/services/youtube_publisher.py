@@ -4,6 +4,7 @@ import logging
 import os
 from pathlib import Path
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
@@ -61,6 +62,11 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
             raise
 
     def _build_service(self):
+        # 0. 環境変数に直接設定されたOAuthクレデンシャルを優先
+        refresh_service = self._build_refresh_token_service()
+        if refresh_service is not None:
+            return refresh_service
+
         # 1. OAuth2認証を優先して試行
         if self._client_secrets_path.exists():
             return self._build_oauth2_service()
@@ -74,6 +80,29 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
             "No valid authentication method found. "
             "Please provide either OAuth2 client secrets or service account credentials."
         )
+
+    def _build_refresh_token_service(self):
+        """環境変数に保存されたリフレッシュトークンを用いてサービスを構築"""
+        settings = self._settings
+        if not (settings.google_client_id and settings.google_client_secret and settings.google_refresh_token):
+            return None
+
+        creds = Credentials(
+            token=None,
+            refresh_token=settings.google_refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=settings.google_client_id,
+            client_secret=settings.google_client_secret,
+            scopes=self.SCOPES,
+        )
+
+        try:
+            creds.refresh(Request())
+        except RefreshError as exc:
+            self._logger.error("Failed to refresh YouTube credentials: %s", exc)
+            return None
+
+        return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
     def _build_oauth2_service(self):
         """OAuth2認証でサービスを構築"""

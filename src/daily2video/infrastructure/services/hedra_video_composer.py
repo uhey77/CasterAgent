@@ -6,6 +6,7 @@ from typing import List
 from ...core.settings import get_settings
 from ...domain.interfaces import VideoComposer
 from ...domain.models import AudioAsset, DialogueSegment, GeneratedImage, SubtitleFile, VideoAsset
+from .topic_overlay import build_topic_overlay, overlay_topic_image
 from ..clients.hedra_client import HedraClient, HedraClientError
 
 
@@ -41,9 +42,32 @@ class HedraVideoComposer(VideoComposer):
             raise HedraClientError(f"Hedra generation {generation_id} completed but no download URL was returned.")
 
         target_path = self._target_path(audio.article_id)
-        self._client.download_asset(status.download_url, target_path)
+        source_video_path = target_path.with_suffix(".hedra.mp4")
+        self._client.download_asset(status.download_url, source_video_path)
 
-        duration = audio.duration_seconds if audio.duration_seconds > 0 else subtitles.segments[-1].end_seconds if subtitles.segments else 0.0
+        duration = (
+            audio.duration_seconds
+            if audio.duration_seconds > 0
+            else subtitles.segments[-1].end_seconds if subtitles.segments else 0.0
+        )
+        overlay_spec = build_topic_overlay(
+            self._settings,
+            audio.article_id,
+            subtitles.segments,
+            duration,
+        )
+        if overlay_spec:
+            try:
+                overlay_topic_image(source_video_path, overlay_spec, target_path, duration)
+                source_video_path.unlink(missing_ok=True)
+            except Exception as exc:
+                print(f"Hedra動画へのトピックオーバーレイ失敗: {exc}")
+                target_path.unlink(missing_ok=True)
+                source_video_path.rename(target_path)
+        else:
+            target_path.unlink(missing_ok=True)
+            source_video_path.rename(target_path)
+
         return VideoAsset(article_id=audio.article_id, file_path=target_path, duration_seconds=duration)
 
     def _target_path(self, article_id: int) -> Path:

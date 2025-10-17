@@ -11,6 +11,7 @@ from daily2video.domain.models import (
     SubtitleSegment,
 )
 from daily2video.infrastructure.clients.hedra_client import HedraGenerationStatus
+from daily2video.infrastructure.services import hedra_video_composer
 from daily2video.infrastructure.services.hedra_video_composer import HedraVideoComposer
 
 
@@ -56,6 +57,7 @@ class StubHedraClient:
 def test_hedra_video_composer_builds_timeline(tmp_path, monkeypatch):
     monkeypatch.setenv("OUTPUT_ROOT", str(tmp_path))
     monkeypatch.setenv("HEDRA_AVATAR_ID", "chr_avatar_primary")
+    monkeypatch.setattr(hedra_video_composer, "build_topic_overlay", lambda *args, **kwargs: None)
 
     get_settings.cache_clear()  # ensure environment overrides are picked up
     try:
@@ -91,7 +93,7 @@ def test_hedra_video_composer_builds_timeline(tmp_path, monkeypatch):
         assert client.generations[0]["audio_asset_id"] == "asset-1"
         assert client.generations[0]["avatar_asset_id"] == "chr_avatar_primary"
         assert "こんにちは こんばんは" in client.generations[0]["prompt"]
-        assert client.downloaded_to == video_asset.file_path
+        assert client.downloaded_to == video_asset.file_path.with_suffix(".hedra.mp4")
         assert video_asset.file_path.exists()
     finally:
         get_settings.cache_clear()

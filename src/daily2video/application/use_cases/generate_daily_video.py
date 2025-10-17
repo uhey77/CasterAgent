@@ -142,8 +142,10 @@ class GenerateDailyVideo:
 
     def _should_upload_video(self, article: Article) -> bool:
         """ESAの記事日付が当日と一致するときだけアップロードを許可"""
-        if not article or not article.published_at:
+        if not article:
             return False
+        if not article.published_at:
+            return True
 
         published_date = article.published_at.date()
         current_date = datetime.now(article.published_at.tzinfo).date() if article.published_at.tzinfo else datetime.utcnow().date()

@@ -67,6 +67,9 @@ class AppSettings(BaseSettings):
     google_sheets_id: str = Field(default="")
     google_drive_folder_id: str = Field(default="")
     youtube_channel_id: str = Field(default="")
+    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
+    google_refresh_token: str = Field(default="", alias="GOOGLE_REFRESH_TOKEN")
 
     slack_webhook_url: str = Field(default="")
 
