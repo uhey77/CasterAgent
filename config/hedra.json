@@ -1,0 +1,4 @@
+{
+  "poll_timeout_seconds": 1200,
+  "poll_interval_seconds": 5.0
+}

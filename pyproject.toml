@@ -23,6 +23,7 @@ dependencies = [
     "google-auth>=2.35.0",
     "google-auth-oauthlib>=1.2.1",
     "pytest>=8.4.2",
+    "livekit-agents[hedra]~=1.0",
 ]
 
 [build-system]

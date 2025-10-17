@@ -32,10 +32,19 @@ class Script:
 
 
 @dataclass(slots=True)
+class DialogueSegment:
+    speaker: str
+    text: str
+    start_seconds: float
+    end_seconds: float
+
+
+@dataclass(slots=True)
 class AudioAsset:
     article_id: int
     file_path: Path
     duration_seconds: float
+    segments: List[DialogueSegment] = field(default_factory=list)
 
 
 @dataclass(slots=True)

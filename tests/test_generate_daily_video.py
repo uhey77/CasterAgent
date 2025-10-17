@@ -24,6 +24,7 @@ from daily2video.domain.interfaces import (
 from daily2video.domain.models import (
     Article,
     AudioAsset,
+    DialogueSegment,
     GeneratedImage,
     PipelineError,
     Script,
@@ -63,7 +64,16 @@ class FakeScriptGenerator(ScriptGenerator):
 
 class FakeAudioSynthesizer(AudioSynthesizer):
     def synthesize(self, script: Script) -> AudioAsset:
-        return AudioAsset(article_id=script.article_id, file_path=Path("/tmp/audio.mp3"), duration_seconds=10.0)
+        segments = [
+            DialogueSegment(speaker="A", text="こんにちは", start_seconds=0.0, end_seconds=5.0),
+            DialogueSegment(speaker="B", text="こんばんは", start_seconds=5.0, end_seconds=10.0),
+        ]
+        return AudioAsset(
+            article_id=script.article_id,
+            file_path=Path("/tmp/audio.mp3"),
+            duration_seconds=10.0,
+            segments=segments,
+        )
 
 
 class FakeSubtitleGenerator(SubtitleGenerator):
