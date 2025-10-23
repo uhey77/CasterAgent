@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import re
 from typing import Any
 
@@ -20,6 +20,9 @@ class EsaRestClient(ArticleRepository):
             raise RuntimeError("ESA API token is not configured")
         if not self._settings.esa_team:
             raise RuntimeError("ESA team is not configured")
+        self._preferred_category = (self._settings.esa_category or "").strip() or None
+        raw_tags = self._settings.esa_tag or ""
+        self._preferred_tags = [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
 
     def latest(self) -> Article | None:
         base_params = {
@@ -119,30 +122,67 @@ class EsaRestClient(ArticleRepository):
             print(f"[esa_client] {context}: 投稿が取得できませんでした")
             return None, None
 
-        annotated: list[tuple[dict, date | None]] = []
-        for post in posts:
+        annotated: list[tuple[int, dict, date | None, tuple[int, int]]] = []
+        for idx, post in enumerate(posts):
             post_date = self._extract_post_date(post)
-            annotated.append((post, post_date))
-            if post_date == target_date:
-                return self._to_article(post), post_date
+            preference_score = self._preference_score(post)
+            annotated.append((idx, post, post_date, preference_score))
 
-        with_dates = [item for item in annotated if item[1] is not None]
+        def _pick_for_date(target: date):
+            candidates = [
+                item for item in annotated if item[2] == target and (item[3][0] or item[3][1])
+            ]
+            if not candidates:
+                return None
+            best = max(candidates, key=lambda item: (item[3][0], item[3][1], -item[0]))
+            return self._to_article(best[1]), target
+
+        result = _pick_for_date(target_date)
+        if result:
+            return result
+
+        previous_day = target_date - timedelta(days=1)
+        result = _pick_for_date(previous_day)
+        if result:
+            print(
+                f"[esa_client] {context}: 当日記事が見つからなかったため前日({previous_day})の記事を使用します。"
+            )
+            return result
+
+        with_dates = [item for item in annotated if item[2] is not None]
+        preferred_with_dates = [item for item in with_dates if item[3][0] or item[3][1]]
+        if preferred_with_dates:
+            fallback_date = max(item[2] for item in preferred_with_dates)
+            fallback_candidates = [
+                item for item in preferred_with_dates if item[2] == fallback_date
+            ]
+            best = max(fallback_candidates, key=lambda item: (item[3][0], item[3][1], -item[0]))
+            print(
+                f"[esa_client] {context}: 当日・前日記事が見つからず最新の対象記事を使用します。",
+                f"target_date={target_date}",
+                f"fallback_date={fallback_date}",
+                "candidates=",
+                [(post.get('number'), item_date) for _, post, item_date, _ in annotated[:5]],
+            )
+            return self._to_article(best[1]), fallback_date
+
         if with_dates:
-            fallback_post, fallback_date = max(with_dates, key=lambda item: item[1])
+            _, fallback_post, fallback_date, _ = max(with_dates, key=lambda item: item[2])
             print(
                 f"[esa_client] {context}: 当日記事が見つからず最新日付の記事を使用します。",
                 f"target_date={target_date}",
                 f"fallback_date={fallback_date}",
                 "candidates=",
-                [(post.get('number'), item_date) for post, item_date in annotated[:5]],
+                [(post.get('number'), item_date) for _, post, item_date, _ in annotated[:5]],
             )
             return self._to_article(fallback_post), fallback_date
 
         print(
             f"[esa_client] {context}: 日付情報を特定できなかったため、先頭の記事を使用します。",
-            [(post.get('number'), post.get('name')) for post, _ in annotated[:3]],
+            [(post.get('number'), post.get('name')) for _, post, _, _ in annotated[:3]],
         )
-        first_post, first_date = annotated[0]
+        first_post = annotated[0][1]
+        first_date = annotated[0][2]
         return self._to_article(first_post), first_date
 
     def _extract_post_date(self, post: dict) -> date | None:
@@ -177,3 +217,16 @@ class EsaRestClient(ArticleRepository):
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
+
+    def _preference_score(self, post: dict) -> tuple[int, int]:
+        category_match = 0
+        if self._preferred_category and post.get("category") == self._preferred_category:
+            category_match = 1
+
+        tag_match = 0
+        if self._preferred_tags:
+            post_tags = post.get("tags") or []
+            if any(tag in post_tags for tag in self._preferred_tags):
+                tag_match = 1
+
+        return category_match, tag_match

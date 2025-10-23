@@ -9,7 +9,10 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+import json
+
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from ...core.settings import get_settings
@@ -44,41 +47,56 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
         }
         
         try:
-            media = MediaFileUpload(str(video.file_path), chunksize=-1, resumable=True)
-            request = self._service.videos().insert(part="snippet,status", body=body, media_body=media)
-            response = None
-            
-            while response is None:
-                status, response = request.next_chunk()
-                if status:
-                    self._logger.info("Upload progress: %.2f%%", status.progress() * 100)
-            
-            youtube_id = response.get("id")
-            self._logger.info("Video uploaded successfully: %s", youtube_id)
-            return youtube_id
-            
-        except Exception as e:
-            self._logger.error("YouTube upload failed: %s", str(e))
+            return self._perform_upload(video.file_path, body)
+        except HttpError as exc:
+            if self._is_signup_required(exc):
+                self._logger.warning(
+                    "Service account does not have YouTube upload permission; skipping upload."
+                )
+                return None
+            self._logger.error("YouTube upload failed: %s", exc)
+            raise RuntimeError(
+                "YouTube upload failed. Ensure the configured credentials have upload permission."
+            ) from exc
+        except Exception as exc:
+            self._logger.error("YouTube upload failed: %s", exc)
             raise
 
+    def _perform_upload(self, file_path: Path, body: dict) -> str | None:
+        media = MediaFileUpload(str(file_path), chunksize=-1, resumable=True)
+        request = self._service.videos().insert(part="snippet,status", body=body, media_body=media)
+        response = None
+
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                self._logger.info("Upload progress: %.2f%%", status.progress() * 100)
+
+        youtube_id = response.get("id")
+        self._logger.info("Video uploaded successfully: %s", youtube_id)
+        return youtube_id
+
+    def _is_signup_required(self, exc: HttpError) -> bool:
+        try:
+            data = json.loads(exc.content.decode("utf-8"))
+        except Exception:
+            return False
+
+        errors = data.get("error", {}).get("errors")
+        if not isinstance(errors, list):
+            return False
+        return any(item.get("reason") == "youtubeSignupRequired" for item in errors)
+
     def _build_service(self):
-        # 0. 環境変数に直接設定されたOAuthクレデンシャルを優先
+        if self._settings.google_application_credentials:
+            return self._build_service_account_service()
+
         refresh_service = self._build_refresh_token_service()
         if refresh_service is not None:
             return refresh_service
 
-        # 1. OAuth2認証を優先して試行
-        if self._client_secrets_path.exists():
-            return self._build_oauth2_service()
-            
-        # 2. フォールバック: サービスアカウント認証
-        if self._settings.google_application_credentials:
-            self._logger.warning("Using service account for YouTube API (may have limitations)")
-            return self._build_service_account_service()
-            
         raise RuntimeError(
-            "No valid authentication method found. "
-            "Please provide either OAuth2 client secrets or service account credentials."
+            "No valid authentication method found. Provide GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_REFRESH_TOKEN."
         )
 
     def _build_refresh_token_service(self):
@@ -115,10 +133,13 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
         # 認証情報が無効または存在しない場合
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                # トークンをリフレッシュ
-                creds.refresh(Request())
-            else:
-                # 初回認証フロー
+                try:
+                    creds.refresh(Request())
+                except RefreshError:
+                    self._logger.warning("Stored YouTube token invalid; removing and re-running consent flow.")
+                    self._credentials_path.unlink(missing_ok=True)
+                    creds = None
+            if not creds or not creds.valid:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     str(self._client_secrets_path), self.SCOPES
                 )
@@ -137,4 +158,5 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
             self._settings.google_application_credentials,
             scopes=self.SCOPES,
         )
+        self._logger.info("Using service account credentials for YouTube uploads.")
         return build("youtube", "v3", credentials=credentials, cache_discovery=False)

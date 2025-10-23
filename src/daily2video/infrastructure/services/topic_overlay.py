@@ -52,7 +52,13 @@ def overlay_topic_image(
     overlay_end = max(overlay_start, min(total_duration, spec.end))
     subtitle_safe_area = 240
     y_offset = 80
-    available_height = max(200, int(1080 - y_offset - subtitle_safe_area))
+
+    filter_complex = (
+        f"[1:v][0:v]scale2ref=w='min(iw,main_w*0.9)':"
+        f"h='min(ih,max(1,(main_h-{subtitle_safe_area})*0.9))'[topic][base];"
+        f"[base][topic]overlay=(main_w-overlay_w)/2:{y_offset}:"
+        f"enable='between(t,{overlay_start},{overlay_end})'"
+    )
 
     cmd = [
         "ffmpeg",
@@ -61,16 +67,7 @@ def overlay_topic_image(
         "-i",
         str(spec.image_path),
         "-filter_complex",
-        (
-            "[1:v] scale=1920:{available_height}:force_original_aspect_ratio=decrease [topic]; "
-            "[0:v][topic] overlay=(main_w-overlay_w)/2:{y_offset}:"
-            "enable='between(t,{start},{end})'"
-        ).format(
-            available_height=available_height,
-            y_offset=y_offset,
-            start=overlay_start,
-            end=overlay_end,
-        ),
+        filter_complex,
         "-c:a",
         "copy",
         "-y",
