@@ -87,7 +87,7 @@ class EsaRestClient(ArticleRepository):
         if parsed_published_at is None:
             parsed_published_at = parsed_created_at or parsed_updated_at
 
-        return Article(
+        article = Article(
             article_id=raw.get("number", 0),
             title=raw.get("name", ""),
             markdown_body=raw.get("body_md", ""),
@@ -96,6 +96,8 @@ class EsaRestClient(ArticleRepository):
             url=raw.get("url"),
             published_at=parsed_published_at,
         )
+        self._persist_article_markdown(article.article_id, article.markdown_body)
+        return article
 
     def _current_date_jst(self):
         return datetime.utcnow().astimezone(self._jst_timezone()).date()
@@ -230,3 +232,12 @@ class EsaRestClient(ArticleRepository):
                 tag_match = 1
 
         return category_match, tag_match
+
+    def _persist_article_markdown(self, article_id: int, markdown_body: str) -> None:
+        if not markdown_body:
+            return
+        try:
+            path = self._settings.storage.articles_dir / f"{article_id}.md"
+            path.write_text(markdown_body, encoding="utf-8")
+        except OSError:
+            pass

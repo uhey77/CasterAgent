@@ -27,10 +27,11 @@ def build_topic_overlay(
     total_duration: float,
 ) -> Optional[TopicOverlaySpec]:
     script_text = _load_script_text(settings, article_id)
-    if not script_text:
+    article_text = _load_article_markdown(settings, article_id)
+    if not script_text and not article_text:
         return None
 
-    research_items = _extract_research_items(script_text)
+    research_items = _extract_research_items(script_text or "", article_text)
     if not research_items:
         return None
 
@@ -50,17 +51,13 @@ def overlay_topic_image(
 ) -> None:
     overlay_start = max(0.0, min(total_duration, spec.start))
     overlay_end = max(overlay_start, min(total_duration, spec.end))
-    subtitle_safe_area = 240
     y_offset = 80
-
     filter_complex = (
-        f"[1:v][0:v]scale2ref=w='min(iw,main_w*0.9)':"
-        f"h='min(ih,max(1,(main_h-{subtitle_safe_area})*0.9))'[topic][base];"
-        f"[base][topic]overlay=(main_w-overlay_w)/2:{y_offset}:"
+        f"[0:v][1:v]overlay=(main_w-overlay_w)/2:{y_offset}:"
         f"enable='between(t,{overlay_start},{overlay_end})'"
     )
 
-    cmd = [
+    base_cmd = [
         "ffmpeg",
         "-i",
         str(input_video),
@@ -74,12 +71,26 @@ def overlay_topic_image(
         str(output_video),
     ]
 
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
+    codec_variants = [
+        ["-c:v", "h264_videotoolbox", "-b:v", "4000k", "-pix_fmt", "yuv420p"],
+        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"],
+    ]
+
+    last_error: subprocess.CalledProcessError | None = None
+    for variant in codec_variants:
+        cmd = base_cmd[:]
+        cmd[7:7] = variant
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            return
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
         raise RuntimeError(
-            "FFmpeg overlay failed: %s" % (exc.stderr or exc.stdout)
-        ) from exc
+            "FFmpeg overlay failed: %s" % (last_error.stderr or last_error.stdout)
+        ) from last_error
 
 
 def _load_script_text(settings: AppSettings, article_id: int) -> Optional[str]:
@@ -90,6 +101,16 @@ def _load_script_text(settings: AppSettings, article_id: int) -> Optional[str]:
         return script_path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         return script_path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _load_article_markdown(settings: AppSettings, article_id: int) -> Optional[str]:
+    article_path = settings.storage.articles_dir / f"{article_id}.md"
+    if not article_path.exists():
+        return None
+    try:
+        return article_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return article_path.read_text(encoding="utf-8", errors="ignore")
 
 
 def _create_topic_list_image(
@@ -198,9 +219,16 @@ def _calculate_topic_overlay_window(
     return overlay_start, overlay_end
 
 
-def _extract_research_items(script_text: str) -> List[Tuple[str, str]]:
-    items: List[Tuple[str, str]] = []
+def _extract_research_items(script_text: str, article_text: Optional[str]) -> List[Tuple[str, str]]:
     seen: set[str] = set()
+
+    if article_text:
+        items_from_article = _extract_items_from_article(article_text, seen)
+        if items_from_article:
+            return items_from_article
+
+    items: List[Tuple[str, str]] = []
+    seen = set()
 
     for line in script_text.splitlines():
         matches_jp = re.findall(r"「([^」]+)」", line)
@@ -233,6 +261,34 @@ def _extract_research_items(script_text: str) -> List[Tuple[str, str]]:
 
             if len(items) >= 20:
                 break
+
+        if len(items) >= 20:
+            break
+
+    return items
+
+
+def _extract_items_from_article(article_text: str, seen: set[str]) -> List[Tuple[str, str]]:
+    items: List[Tuple[str, str]] = []
+    current_section = ""
+
+    for raw_line in article_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.startswith("##"):
+            hashes = len(line) - len(line.lstrip("#"))
+            content = line[hashes:].strip()
+            if hashes == 2:
+                current_section = content
+            elif hashes >= 3:
+                title = re.sub(r"^\d+\)\s*", "", content).strip()
+                if not title or title in seen:
+                    continue
+                category = _categorize_research(title, current_section or raw_line)
+                items.append((category, title))
+                seen.add(title)
 
         if len(items) >= 20:
             break

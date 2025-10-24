@@ -35,6 +35,10 @@ class StoragePaths(BaseModel):
     def metadata_dir(self) -> Path:
         return self.root / "metadata"
 
+    @property
+    def articles_dir(self) -> Path:
+        return self.root / "articles"
+
     def ensure_directories(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         for child in (
@@ -44,6 +48,7 @@ class StoragePaths(BaseModel):
             self.images_dir,
             self.videos_dir,
             self.metadata_dir,
+            self.articles_dir,
         ):
             child.mkdir(parents=True, exist_ok=True)
 
@@ -70,6 +75,7 @@ class AppSettings(BaseSettings):
     google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
     google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
     google_refresh_token: str = Field(default="", alias="GOOGLE_REFRESH_TOKEN")
+    google_delegated_email: str = Field(default="", alias="GOOGLE_DELEGATED_EMAIL")
 
     slack_webhook_url: str = Field(default="")
 
