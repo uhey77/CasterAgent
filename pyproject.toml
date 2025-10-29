@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.4.0",
     "python-dotenv>=1.0.1",
     "requests>=2.32.3",
+    "syncsdk>=0.2.5",
     "moviepy==1.0.3",
     "imageio-ffmpeg>=0.4.2",
     "pillow>=8.0.0,<10.0.0",
@@ -57,4 +58,3 @@ minversion = "7.0"
 addopts = "-ra"
 testpaths = ["tests"]
 log_level = "INFO"
-
