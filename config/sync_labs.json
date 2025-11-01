@@ -1,6 +1,0 @@
-{
-  "poll_timeout_seconds": 900,
-  "poll_interval_seconds": 5.0,
-  "model": "lipsync-2",
-  "sync_mode": ""
-}
