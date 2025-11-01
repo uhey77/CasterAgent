@@ -28,3 +28,6 @@ workdir/
 
 # uv
 .uv/
+
+# Logs
+server.log

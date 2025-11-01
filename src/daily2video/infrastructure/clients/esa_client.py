@@ -13,6 +13,7 @@ from ...domain.models import Article
 
 class EsaRestClient(ArticleRepository):
     BASE_URL = "https://api.esa.io/v1"
+    PER_PAGE = 20
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -25,39 +26,13 @@ class EsaRestClient(ArticleRepository):
         self._preferred_tags = [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
 
     def latest(self) -> Article | None:
-        base_params = {
-            "per_page": 10,
-            "sort": "created",
-            "order": "desc",
-            "wip": "false",
-        }
-        params = dict(base_params)
-        self._append_filters(params)
-
-        response = self._request("GET", "/posts", params=params)
-        posts = response.get("posts", [])
         target_date = self._current_date_jst()
-
-        selected, selected_date = self._select_article(posts, target_date, context="filtered")
-        if selected and selected_date == target_date:
-            return selected
-        if selected and selected_date is not None:
-            print(
-                "[esa_client]",
-                "フィルタ適用時に当日と異なる記事が見つかったため、フィルタ無しで再取得します。",
-                f"target_date={target_date}",
-                f"selected_date={selected_date}",
-                f"article_id={selected.article_id}",
-            )
-
-        print("[esa_client] 指定したカテゴリ/タグでは当日記事が見つからなかったためフィルタ無しで再取得します。")
-        response = self._request("GET", "/posts", params=base_params)
-        posts_unfiltered = response.get("posts", [])
-        selected, _ = self._select_article(posts_unfiltered, target_date, context="unfiltered")
-        if selected:
-            return selected
-
-        return None
+        posts = self._fetch_posts()
+        if not posts:
+            print("[esa_client] category_filtered: 指定カテゴリの記事が取得できませんでした。")
+            return None
+        selected, _ = self._select_article(posts, target_date, context="category_filtered")
+        return selected
 
     def by_id(self, article_id: int) -> Article | None:
         response = self._request("GET", f"/posts/{article_id}")
@@ -74,10 +49,34 @@ class EsaRestClient(ArticleRepository):
         return response.json()
 
     def _append_filters(self, params: dict[str, Any]) -> None:
-        if self._settings.esa_category:
-            params["category"] = self._settings.esa_category
-        if self._settings.esa_tag:
-            params["q"] = f"tag:{self._settings.esa_tag}"
+        queries: list[str] = []
+        if self._preferred_category:
+            queries.append(f'category:"{self._preferred_category}"')
+        elif self._preferred_tags:
+            queries.append(self._tag_query(self._preferred_tags))
+
+        if queries:
+            params["q"] = " ".join(queries)
+
+    def _fetch_posts(self) -> list[dict]:
+        params = {
+            "per_page": self.PER_PAGE,
+            "sort": "created",
+            "order": "desc",
+            "wip": "false",
+        }
+        self._append_filters(params)
+        response = self._request("GET", "/posts", params=params)
+        return response.get("posts", [])
+
+    @staticmethod
+    def _tag_query(tags: list[str]) -> str:
+        if not tags:
+            return ""
+        if len(tags) == 1:
+            return f"tag:{tags[0]}"
+        clause = " OR ".join(f"tag:{tag}" for tag in tags)
+        return f"({clause})"
 
     def _to_article(self, raw: dict) -> Article:
         parsed_published_at = self._parse_datetime(raw.get("published_at"))
@@ -100,7 +99,7 @@ class EsaRestClient(ArticleRepository):
         return article
 
     def _current_date_jst(self):
-        return datetime.utcnow().astimezone(self._jst_timezone()).date()
+        return datetime.now(self._jst_timezone()).date()
 
     @staticmethod
     def _jst_timezone():
@@ -130,13 +129,19 @@ class EsaRestClient(ArticleRepository):
             preference_score = self._preference_score(post)
             annotated.append((idx, post, post_date, preference_score))
 
+        requires_preference = bool(self._preferred_category or self._preferred_tags)
+
         def _pick_for_date(target: date):
-            candidates = [
-                item for item in annotated if item[2] == target and (item[3][0] or item[3][1])
-            ]
+            candidates = [item for item in annotated if item[2] == target]
             if not candidates:
                 return None
             best = max(candidates, key=lambda item: (item[3][0], item[3][1], -item[0]))
+            if requires_preference and not (best[3][0] or best[3][1]):
+                print(
+                    f"[esa_client] {context}: 指定フィルタに一致しないものの、日付が一致する記事を使用します。",
+                    f"target_date={target}",
+                    f"article_id={best[1].get('number')}",
+                )
             return self._to_article(best[1]), target
 
         result = _pick_for_date(target_date)
@@ -152,7 +157,11 @@ class EsaRestClient(ArticleRepository):
             return result
 
         with_dates = [item for item in annotated if item[2] is not None]
-        preferred_with_dates = [item for item in with_dates if item[3][0] or item[3][1]]
+        preferred_with_dates = (
+            [item for item in with_dates if item[3][0] or item[3][1]]
+            if requires_preference
+            else with_dates
+        )
         if preferred_with_dates:
             fallback_date = max(item[2] for item in preferred_with_dates)
             fallback_candidates = [
@@ -188,18 +197,20 @@ class EsaRestClient(ArticleRepository):
         return self._to_article(first_post), first_date
 
     def _extract_post_date(self, post: dict) -> date | None:
-        published = self._parse_datetime(post.get("published_at"))
-        if published:
-            return published.astimezone(self._jst_timezone()).date()
-
+        # タイトルから日付を抽出（優先）
         name = post.get("name") or ""
-        match = re.search(r"(20\\d{2})[-/年](\\d{2})[-/月](\\d{2})", name)
+        match = re.search(r"(20\d{2})[-/年](0?\d{1,2})[-/月](0?\d{1,2})", name)
         if match:
             year, month, day = match.groups()
             try:
                 return date(int(year), int(month), int(day))
             except ValueError:
                 pass
+        
+        # フォールバック: published_at
+        published = self._parse_datetime(post.get("published_at"))
+        if published:
+            return published.astimezone(self._jst_timezone()).date()
 
         created = self._parse_datetime(post.get("created_at"))
         if created:

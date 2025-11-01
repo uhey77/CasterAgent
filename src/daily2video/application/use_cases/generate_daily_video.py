@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from ...domain.interfaces import (
@@ -23,6 +23,12 @@ from ...domain.models import (
     VideoAsset,
     VideoMetadata,
 )
+
+JST = timezone(timedelta(hours=9))
+
+
+def _now_jst() -> datetime:
+    return datetime.now(timezone.utc).astimezone(JST)
 
 
 @dataclass(slots=True)
@@ -64,7 +70,7 @@ class GenerateDailyVideo:
         self._notifier = notifier
 
     def execute(self, command: GenerateDailyVideoInput) -> GenerateDailyVideoResult:
-        status = PipelineStatus(status="started", started_at=datetime.utcnow())
+        status = PipelineStatus(status="started", started_at=_now_jst())
         self._logger.log({"event": "pipeline_started", "started_at": status.started_at.isoformat()})
         try:
             article = self._resolve_article(command.article_id)
@@ -119,12 +125,12 @@ class GenerateDailyVideo:
                 )
                 status.notes.append("YouTubeアップロードはESA記事の日付不一致のためスキップされました")
 
-            status.completed_at = datetime.utcnow()
+            status.completed_at = _now_jst()
             self._notifier.notify("AI-Daily動画の自動生成が完了しました", extra={"status": status.status})
             return GenerateDailyVideoResult(status=status, video=video, metadata=metadata, youtube_video_id=youtube_video_id)
         except Exception as exc:  # pylint: disable=broad-except
             status.status = "failed"
-            status.completed_at = datetime.utcnow()
+            status.completed_at = _now_jst()
             status.notes.append(str(exc))
             self._logger.log({"event": "pipeline_failed", "error": str(exc)})
             self._notifier.notify(
@@ -147,6 +153,10 @@ class GenerateDailyVideo:
         if not article.published_at:
             return True
 
-        published_date = article.published_at.date()
-        current_date = datetime.now(article.published_at.tzinfo).date() if article.published_at.tzinfo else datetime.utcnow().date()
+        if article.published_at.tzinfo:
+            published_date = article.published_at.astimezone(JST).date()
+        else:
+            published_date = article.published_at.date()
+
+        current_date = _now_jst().date()
         return published_date == current_date

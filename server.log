@@ -1,13 +1,10 @@
-INFO:     127.0.0.1:49567 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49589 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:49615 - "GET /docs HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49615 - "GET /openapi.json HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49615 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49615 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50350 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50350 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50350 - "GET /openapi.json HTTP/1.1" 200 OK
 [esa_client] filtered: 当日・前日記事が見つからず最新の対象記事を使用します。 target_date=2025-10-24 fallback_date=2025-10-03 candidates= [(132, datetime.date(2025, 10, 3))]
 [esa_client] フィルタ適用時に当日と異なる記事が見つかったため、フィルタ無しで再取得します。 target_date=2025-10-24 selected_date=2025-10-03 article_id=132
 [esa_client] 指定したカテゴリ/タグでは当日記事が見つからなかったためフィルタ無しで再取得します。
 [esa_client] unfiltered: 当日記事が見つからなかったため前日(2025-10-23)の記事を使用します。
 MoviePy - Writing audio in data/audio/176.mp3
 MoviePy - Done.
-INFO:     127.0.0.1:49622 - "POST /pipeline/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50350 - "POST /pipeline/run HTTP/1.1" 500 Internal Server Error

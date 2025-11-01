@@ -23,6 +23,7 @@ src/ai_daily2video/
 - (Optional) Google Cloud service account for Sheets logging and YouTube uploads
 - (Optional) Slack Incoming Webhook for notifications
 - (Optional) Hedra API key plus character IDs if you want photoreal conversational avatars instead of static slides
+- (Optional) Sync Labs API key and a reference video for their lipsync service
 
 ## Getting Started
 
@@ -52,6 +53,7 @@ Artifacts (scripts, audio, subtitles, backgrounds, videos, metadata) are stored 
 - **Ruff** for linting (`uv run ruff check src tests`)
 - **Pytest** for automated tests (`uv run pytest`)
 - **MoviePy** for video composition
+- **Sync Labs API** for lipsync rendering when `SYNC_LABS_API_KEY` plus a template video are configured
 - **Hedra API** for two-speaker avatar rendering when `HEDRA_API_KEY` is configured
 
 ## Notes
@@ -59,7 +61,26 @@ Artifacts (scripts, audio, subtitles, backgrounds, videos, metadata) are stored 
 - Background artwork is generated automatically via `gpt-image-1` and cached per article.
 - When Google credentials are absent, uploads are skipped gracefully. The composed video remains in `data/videos`.
 - Ensure ImageMagick is installed if MoviePy requires it for text rendering on your platform.
-- When Hedra credentials are provided, the pipeline uploads the mixed audio track and per-line timing to Hedra, polls until the avatar video is ready, then downloads it before publishing. Without Hedra configuration the legacy MoviePy-based slideshow renderer is used instead.
+- When Sync Labs credentials are provided the pipeline uploads the mixed audio track (and optional local video) to Sync Labs for lipsync rendering, waits for the output, then continues with topic overlays and delivery.
+- When Hedra credentials are provided, the pipeline uploads the mixed audio track and per-line timing to Hedra, polls until the avatar video is ready, then downloads it before publishing. Without Sync Labs or Hedra configuration the legacy MoviePy-based slideshow renderer is used instead.
+
+### Sync Labs configuration (optional)
+
+```
+SYNC_LABS_API_KEY=sk_sync_...
+# Provide either a remote video URL or a local file path for the anchor footage
+SYNC_LABS_VIDEO_URL=https://example.com/anchor.mp4
+# SYNC_LABS_VIDEO_PATH=assets/anchor.mp4
+
+# Optional tuning
+SYNC_LABS_MODEL=lipsync-2
+SYNC_LABS_SYNC_MODE=cut_off            # bounce | loop | cut_off | silence | remap
+SYNC_LABS_ACTIVE_SPEAKER=false         # enable auto speaker detection
+SYNC_LABS_TEMPERATURE=0.4              # expression intensity, 0.0-1.0
+SYNC_LABS_OCCLUSION_DETECTION=false    # slows generation but handles hand-over-mouth cases
+```
+
+Additional polling or default values can be tweaked in `config/sync_labs.json`.
 
 ### Hedra configuration (optional)
 

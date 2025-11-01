@@ -82,6 +82,11 @@ class AppSettings(BaseSettings):
     default_voice: str = Field(default="gpt-4o-mini-tts")
     default_speech_speed: float = Field(default=1.05)
     default_font_path: Path | None = Field(default=None)
+    tts_speed_min: float = Field(default=0.85)
+    tts_speed_max: float = Field(default=1.8)
+    tts_resynthesis_max_attempts: int = Field(default=4)
+    target_video_min_seconds: float = Field(default=255.0)
+    target_video_max_seconds: float = Field(default=285.0)
 
     scheduler_cron: str = Field(default="0 22 * * *")
 
@@ -101,6 +106,21 @@ class AppSettings(BaseSettings):
     hedra_status_endpoint: str = Field(default="/public/generations", alias="HEDRA_STATUS_ENDPOINT")
     hedra_config_path: Path = Field(default=Path("config/hedra.json"), alias="HEDRA_CONFIG_PATH")
 
+    sync_labs_api_key: str = Field(default="", alias="SYNC_LABS_API_KEY")
+    sync_labs_base_url: str = Field(default="https://api.sync.so", alias="SYNC_LABS_BASE_URL")
+    sync_labs_model: str = Field(default="lipsync-2", alias="SYNC_LABS_MODEL")
+    sync_labs_video_url: str = Field(default="", alias="SYNC_LABS_VIDEO_URL")
+    sync_labs_video_path: Path | None = Field(default=None, alias="SYNC_LABS_VIDEO_PATH")
+    sync_labs_sync_mode: str = Field(default="cut_off", alias="SYNC_LABS_SYNC_MODE")
+    sync_labs_active_speaker: bool = Field(default=False, alias="SYNC_LABS_ACTIVE_SPEAKER")
+    sync_labs_poll_interval_seconds: float = Field(default=5.0, alias="SYNC_LABS_POLL_INTERVAL_SECONDS")
+    sync_labs_poll_timeout_seconds: float = Field(default=900.0, alias="SYNC_LABS_POLL_TIMEOUT_SECONDS")
+    sync_labs_temperature: float | None = Field(default=None, alias="SYNC_LABS_TEMPERATURE")
+    sync_labs_occlusion_detection_enabled: bool = Field(
+        default=False, alias="SYNC_LABS_OCCLUSION_DETECTION"
+    )
+    sync_labs_config_path: Path = Field(default=Path("config/sync_labs.json"), alias="SYNC_LABS_CONFIG_PATH")
+
     storage: StoragePaths = Field(default_factory=StoragePaths)
     output_root: Path = Field(default=Path("data"), alias="OUTPUT_ROOT")
 
@@ -111,6 +131,7 @@ class AppSettings(BaseSettings):
             self.storage.root = Path(self.output_root)
         self.storage.ensure_directories()
         self._load_hedra_config()
+        self._load_sync_labs_config()
 
     def _load_hedra_config(self) -> None:
         if not self.hedra_config_path:
@@ -136,6 +157,39 @@ class AppSettings(BaseSettings):
                 self.hedra_poll_interval_seconds = float(poll_interval)
             except (TypeError, ValueError) as exc:
                 raise ValueError("hedra.poll_interval_seconds must be a number") from exc
+
+    def _load_sync_labs_config(self) -> None:
+        if not self.sync_labs_config_path:
+            return
+        config_path = Path(self.sync_labs_config_path)
+        if not config_path.is_file():
+            return
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:  # pragma: no cover - invalid configuration
+            raise ValueError(f"Could not parse Sync Labs config JSON at {config_path}") from exc
+
+        poll_timeout = data.get("poll_timeout_seconds")
+        if poll_timeout is not None:
+            try:
+                self.sync_labs_poll_timeout_seconds = float(poll_timeout)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("sync_labs.poll_timeout_seconds must be a number") from exc
+
+        poll_interval = data.get("poll_interval_seconds")
+        if poll_interval is not None:
+            try:
+                self.sync_labs_poll_interval_seconds = float(poll_interval)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("sync_labs.poll_interval_seconds must be a number") from exc
+
+        model = data.get("model")
+        if model:
+            self.sync_labs_model = str(model)
+
+        sync_mode = data.get("sync_mode")
+        if sync_mode:
+            self.sync_labs_sync_mode = str(sync_mode)
 
 
 
