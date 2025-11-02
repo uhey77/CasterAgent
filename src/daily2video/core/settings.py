@@ -79,7 +79,12 @@ class AppSettings(BaseSettings):
 
     slack_webhook_url: str = Field(default="")
 
-    default_voice: str = Field(default="gpt-4o-mini-tts")
+    google_tts_language_code: str = Field(default="ja-JP", alias="GOOGLE_TTS_LANGUAGE_CODE")
+    google_tts_voice_name: str = Field(default="ja-JP-Neural2-C", alias="GOOGLE_TTS_VOICE_NAME")
+    google_tts_ssml_gender: str = Field(default="FEMALE", alias="GOOGLE_TTS_GENDER")
+    google_tts_pitch: float = Field(default=3.0, alias="GOOGLE_TTS_PITCH")
+    google_tts_volume_gain_db: float = Field(default=0.0, alias="GOOGLE_TTS_GAIN_DB")
+    google_tts_effects_profile_id: str = Field(default="", alias="GOOGLE_TTS_EFFECTS_PROFILE")
     default_speech_speed: float = Field(default=1.05)
     default_font_path: Path | None = Field(default=None)
     tts_speed_min: float = Field(default=0.85)

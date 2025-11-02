@@ -12,7 +12,7 @@ from ...infrastructure.services.logging_service import build_pipeline_logger
 from ...infrastructure.services.moviepy_video_composer import MoviePyVideoComposer
 from ...infrastructure.services.noop_publisher import NoOpPublisher
 from ...infrastructure.services.notifier_service import SlackNotifier
-from ...infrastructure.services.openai_audio_service import OpenAIAudioService
+from ...infrastructure.services.google_tts_service import GoogleTextToSpeechService
 from ...infrastructure.services.openai_script_service import OpenAIScriptService
 from ...infrastructure.services.openai_subtitle_service import OpenAISubtitleService
 from ...infrastructure.services.sync_labs_video_composer import SyncLabsVideoComposer
@@ -25,7 +25,7 @@ def build_pipeline_use_case() -> GenerateDailyVideo:
     logger = _build_logger()
     article_repo = EsaRestClient()
     script_generator = OpenAIScriptService()
-    audio = OpenAIAudioService()
+    audio = GoogleTextToSpeechService()
     subtitles = OpenAISubtitleService()
     metadata = script_generator  # shares the same service
     video = _build_video_composer(settings, logger)
