@@ -12,7 +12,6 @@ from daily2video.application.use_cases.generate_daily_video import (
 from daily2video.domain.interfaces import (
     ArticleRepository,
     AudioSynthesizer,
-    BackgroundImageGenerator,
     MetadataGenerator,
     Notifier,
     PipelineLogger,
@@ -25,7 +24,6 @@ from daily2video.domain.models import (
     Article,
     AudioAsset,
     DialogueSegment,
-    GeneratedImage,
     PipelineError,
     Script,
     ScriptLine,
@@ -85,11 +83,6 @@ class FakeSubtitleGenerator(SubtitleGenerator):
         )
 
 
-class FakeBackgroundGenerator(BackgroundImageGenerator):
-    def create_image(self, article: Article) -> GeneratedImage:
-        return GeneratedImage(article_id=article.article_id, file_path=Path("/tmp/image.png"))
-
-
 class FakeMetadataGenerator(MetadataGenerator):
     def build_metadata(self, article: Article, script: Script) -> VideoMetadata:
         return VideoMetadata(
@@ -104,7 +97,7 @@ class FakeMetadataGenerator(MetadataGenerator):
 
 
 class FakeVideoComposer(VideoComposer):
-    def compose(self, audio: AudioAsset, subtitles: SubtitleFile, background: GeneratedImage) -> VideoAsset:
+    def compose(self, audio: AudioAsset, subtitles: SubtitleFile) -> VideoAsset:
         return VideoAsset(article_id=audio.article_id, file_path=Path("/tmp/video.mp4"), duration_seconds=audio.duration_seconds)
 
 
@@ -152,7 +145,6 @@ def build_use_case(article: Optional[Article]) -> GenerateDailyVideo:
         script_generator=FakeScriptGenerator(),
         audio_synthesizer=FakeAudioSynthesizer(),
         subtitle_generator=FakeSubtitleGenerator(),
-        background_generator=FakeBackgroundGenerator(),
         metadata_generator=FakeMetadataGenerator(),
         video_composer=FakeVideoComposer(),
         publisher=FakePublisher(),

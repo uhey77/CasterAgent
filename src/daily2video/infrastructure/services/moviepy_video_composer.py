@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from typing import List
-from pathlib import Path
 
-from moviepy.editor import AudioFileClip, CompositeVideoClip, ImageClip, TextClip
+from moviepy.editor import AudioFileClip, ColorClip, CompositeVideoClip, TextClip
 
 from ...core.settings import get_settings
 from ...domain.interfaces import VideoComposer
-from ...domain.models import AudioAsset, GeneratedImage, SubtitleFile, SubtitleSegment, VideoAsset
+from ...domain.models import AudioAsset, SubtitleFile, SubtitleSegment, VideoAsset
 from .topic_overlay import build_topic_overlay, overlay_topic_image
 
 
@@ -19,7 +18,6 @@ class MoviePyVideoComposer(VideoComposer):
         self,
         audio: AudioAsset,
         subtitles: SubtitleFile,
-        background: GeneratedImage,
     ) -> VideoAsset:
         temp_output_path = self._settings.storage.videos_dir / f"{audio.article_id}_temp.mp4"
         final_output_path = self._settings.storage.videos_dir / f"{audio.article_id}.mp4"
@@ -27,19 +25,14 @@ class MoviePyVideoComposer(VideoComposer):
         audio_clip = AudioFileClip(str(audio.file_path))
         duration = audio_clip.duration
         
-        # 16:9アスペクト比（1920x1080）に強制変更
-        image_clip = (
-            ImageClip(str(background.file_path))
-            .set_duration(duration)
-            .resize((1920, 1080))
-            .set_position("center")
-        )
+        # 背景は単色クリップで構築
+        background_clip = ColorClip(size=(1920, 1080), color=(15, 15, 20)).set_duration(duration)
         
         # 字幕クリップを生成
         subtitle_clips = self._build_subtitle_clips(subtitles.segments, duration)
         
         # 全てのクリップを合成（トピックリストはFFmpegで後から追加）
-        all_clips = [image_clip] + subtitle_clips
+        all_clips = [background_clip] + subtitle_clips
         video_clip = CompositeVideoClip(all_clips)
         final_clip = video_clip.set_audio(audio_clip)
 
@@ -56,7 +49,7 @@ class MoviePyVideoComposer(VideoComposer):
         )
 
         audio_clip.close()
-        image_clip.close()
+        background_clip.close()
         final_clip.close()
         for clip in subtitle_clips:
             clip.close()

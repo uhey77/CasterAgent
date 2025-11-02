@@ -7,7 +7,6 @@ from typing import Optional
 from ...domain.interfaces import (
     ArticleRepository,
     AudioSynthesizer,
-    BackgroundImageGenerator,
     MetadataGenerator,
     Notifier,
     PipelineLogger,
@@ -51,7 +50,6 @@ class GenerateDailyVideo:
         script_generator: ScriptGenerator,
         audio_synthesizer: AudioSynthesizer,
         subtitle_generator: SubtitleGenerator,
-        background_generator: BackgroundImageGenerator,
         metadata_generator: MetadataGenerator,
         video_composer: VideoComposer,
         publisher: VideoPublisher,
@@ -62,7 +60,6 @@ class GenerateDailyVideo:
         self._script_generator = script_generator
         self._audio_synthesizer = audio_synthesizer
         self._subtitle_generator = subtitle_generator
-        self._background_generator = background_generator
         self._metadata_generator = metadata_generator
         self._video_composer = video_composer
         self._publisher = publisher
@@ -89,15 +86,11 @@ class GenerateDailyVideo:
             status.status = "subtitles_ready"
             self._logger.log({"event": "subtitles_generated", "file_path": str(subtitles.file_path)})
 
-            background = self._background_generator.create_image(article)
-            status.status = "background_ready"
-            self._logger.log({"event": "background_generated", "file_path": str(background.file_path)})
-
             metadata = self._metadata_generator.build_metadata(article, script)
             status.status = "metadata_ready"
             self._logger.log({"event": "metadata_generated", "title": metadata.title})
 
-            video = self._video_composer.compose(audio, subtitles, background)
+            video = self._video_composer.compose(audio, subtitles)
             status.status = "video_ready"
             self._logger.log({"event": "video_composed", "file_path": str(video.file_path)})
 

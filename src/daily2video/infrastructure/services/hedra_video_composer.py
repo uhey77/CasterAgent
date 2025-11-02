@@ -5,7 +5,7 @@ from typing import List
 
 from ...core.settings import get_settings
 from ...domain.interfaces import VideoComposer
-from ...domain.models import AudioAsset, DialogueSegment, GeneratedImage, SubtitleFile, VideoAsset
+from ...domain.models import AudioAsset, DialogueSegment, SubtitleFile, VideoAsset
 from .topic_overlay import build_topic_overlay, overlay_topic_image
 from ..clients.hedra_client import HedraClient, HedraClientError
 
@@ -17,7 +17,7 @@ class HedraVideoComposer(VideoComposer):
         self._client = client
         self._settings = get_settings()
 
-    def compose(self, audio: AudioAsset, subtitles: SubtitleFile, background: GeneratedImage) -> VideoAsset:
+    def compose(self, audio: AudioAsset, subtitles: SubtitleFile) -> VideoAsset:
         avatar_id = self._primary_avatar_id()
         if not avatar_id:
             raise HedraClientError(

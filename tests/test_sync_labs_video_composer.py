@@ -4,13 +4,7 @@ from pathlib import Path
 import json
 
 from daily2video.core.settings import get_settings
-from daily2video.domain.models import (
-    AudioAsset,
-    DialogueSegment,
-    GeneratedImage,
-    SubtitleFile,
-    SubtitleSegment,
-)
+from daily2video.domain.models import AudioAsset, DialogueSegment, SubtitleFile, SubtitleSegment
 from daily2video.infrastructure.clients.sync_labs_client import (
     SyncLabsGenerationStatus,
     SyncVideoSource,
@@ -76,13 +70,11 @@ def test_sync_labs_video_composer(tmp_path, monkeypatch):
                 SubtitleSegment(6.0, 12.0, "world"),
             ],
         )
-        background = GeneratedImage(article_id=42, file_path=tmp_path / "bg.png")
-
         client = StubSyncLabsClient()
         video_source = SyncVideoSource(url="https://example.com/template.mp4")
         composer = SyncLabsVideoComposer(client, video_source)
 
-        video_asset = composer.compose(audio_asset, subtitles, background)
+        video_asset = composer.compose(audio_asset, subtitles)
 
         assert client.submissions, "client should receive a submission"
         submission = client.submissions[0]
