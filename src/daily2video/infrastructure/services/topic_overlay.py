@@ -392,57 +392,36 @@ def _calculate_topic_overlay_window(
 
 
 def _extract_research_items(script_text: str, article_text: Optional[str]) -> List[Tuple[str, str]]:
-    seen: set[str] = set()
+    script_items = _extract_items_from_script(script_text or "")
+    article_items: List[Tuple[str, str]] = []
 
     if article_text:
-        items_from_article = _extract_items_from_article(article_text, seen)
-        if items_from_article:
-            return items_from_article
+        article_items = _extract_items_from_article(article_text)
 
-    items: List[Tuple[str, str]] = []
-    seen = set()
+    if script_items:
+        if not article_items:
+            return script_items
 
-    for line in script_text.splitlines():
-        matches_jp = re.findall(r"「([^」]+)」", line)
-        matches_md = re.findall(r"\*\*([^*]+)\*\*", line)
-        matches = matches_jp + matches_md
-
-        for match in matches:
-            title = match.strip()
-            if not title or len(title) < 3 or title.isdigit() or title in seen:
+        article_lookup = {_normalize_title(title): (category, title) for category, title in article_items}
+        merged: List[Tuple[str, str]] = []
+        seen: set[str] = set()
+        for category, title in script_items:
+            key = _normalize_title(title)
+            if key in seen:
                 continue
+            merged.append(article_lookup.get(key, (category, title)))
+            seen.add(key)
 
-            skip_phrases = [
-                "AI Daily",
-                "こちら",
-                "まず",
-                "次に",
-                "最後に",
-                "さらに",
-                "Bridge",
-                "GRPO",
-                "M2PO",
-                "HuDiff",
-            ]
-            if any(phrase == title for phrase in skip_phrases):
-                continue
+        if merged:
+            return merged
 
-            category = _categorize_research(title, line)
-            items.append((category, title))
-            seen.add(title)
-
-            if len(items) >= 20:
-                break
-
-        if len(items) >= 20:
-            break
-
-    return items
+    return article_items
 
 
-def _extract_items_from_article(article_text: str, seen: set[str]) -> List[Tuple[str, str]]:
+def _extract_items_from_article(article_text: str) -> List[Tuple[str, str]]:
     items: List[Tuple[str, str]] = []
     current_section = ""
+    seen: set[str] = set()
 
     for raw_line in article_text.splitlines():
         line = raw_line.strip()
@@ -487,6 +466,56 @@ def _extract_items_from_article(article_text: str, seen: set[str]) -> List[Tuple
             break
 
     return items
+
+
+def _extract_items_from_script(script_text: str) -> List[Tuple[str, str]]:
+    items: List[Tuple[str, str]] = []
+    seen: set[str] = set()
+
+    for line in script_text.splitlines():
+        matches_jp = re.findall(r"「([^」]+)」", line)
+        matches_md = re.findall(r"\*\*([^*]+)\*\*", line)
+        matches = matches_jp + matches_md
+
+        for match in matches:
+            title = match.strip()
+            if not title or len(title) < 3 or title.isdigit():
+                continue
+
+            normalized = _normalize_title(title)
+            if normalized in seen:
+                continue
+
+            skip_phrases = {
+                "ai daily",
+                "こちら",
+                "まず",
+                "次に",
+                "最後に",
+                "さらに",
+                "bridge",
+                "grpo",
+                "m2po",
+                "hudiff",
+            }
+            if normalized in skip_phrases:
+                continue
+
+            category = _categorize_research(title, line)
+            items.append((category, title))
+            seen.add(normalized)
+
+            if len(items) >= 20:
+                break
+
+        if len(items) >= 20:
+            break
+
+    return items
+
+
+def _normalize_title(title: str) -> str:
+    return re.sub(r"\s+", "", title).lower()
 
 
 def _categorize_research(title: str, line: str) -> str:
