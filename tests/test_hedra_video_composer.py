@@ -65,8 +65,8 @@ def test_hedra_video_composer_builds_timeline(tmp_path, monkeypatch):
             file_path=audio_path,
             duration_seconds=10.0,
             segments=[
-                DialogueSegment(speaker="A", text="こんにちは", start_seconds=0.0, end_seconds=4.0),
-                DialogueSegment(speaker="B", text="こんばんは", start_seconds=4.0, end_seconds=8.0),
+                DialogueSegment(speaker="Narrator", text="こんにちは", start_seconds=0.0, end_seconds=4.0),
+                DialogueSegment(speaker="Narrator", text="こんばんは", start_seconds=4.0, end_seconds=8.0),
             ],
         )
         subtitles = SubtitleFile(

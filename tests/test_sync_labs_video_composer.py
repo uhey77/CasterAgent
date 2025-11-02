@@ -58,8 +58,8 @@ def test_sync_labs_video_composer(tmp_path, monkeypatch):
             file_path=audio_path,
             duration_seconds=12.0,
             segments=[
-                DialogueSegment(speaker="A", text="hello", start_seconds=0.0, end_seconds=6.0),
-                DialogueSegment(speaker="B", text="world", start_seconds=6.0, end_seconds=12.0),
+                DialogueSegment(speaker="Narrator", text="hello", start_seconds=0.0, end_seconds=6.0),
+                DialogueSegment(speaker="Narrator", text="world", start_seconds=6.0, end_seconds=12.0),
             ],
         )
         subtitles = SubtitleFile(

@@ -51,10 +51,10 @@ class FakeScriptGenerator(ScriptGenerator):
     def build_script(self, article: Article) -> Script:
         return Script(
             article_id=article.article_id,
-            raw_text="A: こんにちは\nB: こんばんは",
+            raw_text="こんにちは\nこんばんは",
             lines=[
-                ScriptLine("A", "こんにちは"),
-                ScriptLine("B", "こんばんは"),
+                ScriptLine("Narrator", "こんにちは"),
+                ScriptLine("Narrator", "こんばんは"),
             ],
             file_path=Path("/tmp/script.txt"),
         )
@@ -63,8 +63,8 @@ class FakeScriptGenerator(ScriptGenerator):
 class FakeAudioSynthesizer(AudioSynthesizer):
     def synthesize(self, script: Script) -> AudioAsset:
         segments = [
-            DialogueSegment(speaker="A", text="こんにちは", start_seconds=0.0, end_seconds=5.0),
-            DialogueSegment(speaker="B", text="こんばんは", start_seconds=5.0, end_seconds=10.0),
+            DialogueSegment(speaker="Narrator", text="こんにちは", start_seconds=0.0, end_seconds=5.0),
+            DialogueSegment(speaker="Narrator", text="こんばんは", start_seconds=5.0, end_seconds=10.0),
         ]
         return AudioAsset(
             article_id=script.article_id,

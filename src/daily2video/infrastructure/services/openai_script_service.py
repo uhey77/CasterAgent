@@ -168,16 +168,14 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
 
         pattern = re.compile(r"^(?P<speaker>A|B)[：:]\s*(?P<line>.+)$")
         lines: List[ScriptLine] = []
-        default_speaker = "A"
+        default_speaker = "Narrator"
         for line in cleaned.splitlines():
             stripped = line.strip()
             if not stripped:
                 continue
             match = pattern.match(stripped)
-            if match:
-                lines.append(ScriptLine(speaker=match.group("speaker"), text=match.group("line")))
-            else:
-                lines.append(ScriptLine(speaker=default_speaker, text=stripped))
+            text = match.group("line") if match else stripped
+            lines.append(ScriptLine(speaker=default_speaker, text=text))
 
         if not lines:
             lines.append(ScriptLine(speaker=default_speaker, text=cleaned))
