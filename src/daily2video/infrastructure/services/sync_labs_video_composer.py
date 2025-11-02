@@ -7,7 +7,7 @@ from sync.common.types.generation_options import GenerationOptions
 
 from ...core.settings import get_settings
 from ...domain.interfaces import VideoComposer
-from ...domain.models import AudioAsset, GeneratedImage, SubtitleFile, VideoAsset
+from ...domain.models import AudioAsset, SubtitleFile, VideoAsset
 from ..clients.sync_labs_client import (
     SyncLabsClient,
     SyncLabsClientError,
@@ -24,7 +24,7 @@ class SyncLabsVideoComposer(VideoComposer):
         self._video_source = video_source
         self._settings = get_settings()
 
-    def compose(self, audio: AudioAsset, subtitles: SubtitleFile, background: GeneratedImage) -> VideoAsset:
+    def compose(self, audio: AudioAsset, subtitles: SubtitleFile) -> VideoAsset:
         options = self._build_generation_options()
         generation_id = self._client.create_generation(
             model=self._settings.sync_labs_model,

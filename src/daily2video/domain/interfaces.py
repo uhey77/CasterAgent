@@ -3,15 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterable, Protocol
 
-from .models import (
-    Article,
-    AudioAsset,
-    GeneratedImage,
-    Script,
-    SubtitleFile,
-    VideoAsset,
-    VideoMetadata,
-)
+from .models import Article, AudioAsset, Script, SubtitleFile, VideoAsset, VideoMetadata
 
 
 class ArticleRepository(Protocol):
@@ -36,12 +28,8 @@ class MetadataGenerator(Protocol):
     def build_metadata(self, article: Article, script: Script) -> VideoMetadata: ...
 
 
-class BackgroundImageGenerator(Protocol):
-    def create_image(self, article: Article) -> GeneratedImage: ...
-
-
 class VideoComposer(Protocol):
-    def compose(self, audio: AudioAsset, subtitles: SubtitleFile, background: GeneratedImage) -> VideoAsset: ...
+    def compose(self, audio: AudioAsset, subtitles: SubtitleFile) -> VideoAsset: ...
 
 
 class VideoPublisher(Protocol):

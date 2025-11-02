@@ -13,7 +13,6 @@ from ...infrastructure.services.moviepy_video_composer import MoviePyVideoCompos
 from ...infrastructure.services.noop_publisher import NoOpPublisher
 from ...infrastructure.services.notifier_service import SlackNotifier
 from ...infrastructure.services.openai_audio_service import OpenAIAudioService
-from ...infrastructure.services.openai_image_service import OpenAIImageService
 from ...infrastructure.services.openai_script_service import OpenAIScriptService
 from ...infrastructure.services.openai_subtitle_service import OpenAISubtitleService
 from ...infrastructure.services.sync_labs_video_composer import SyncLabsVideoComposer
@@ -28,7 +27,6 @@ def build_pipeline_use_case() -> GenerateDailyVideo:
     script_generator = OpenAIScriptService()
     audio = OpenAIAudioService()
     subtitles = OpenAISubtitleService()
-    background = OpenAIImageService()
     metadata = script_generator  # shares the same service
     video = _build_video_composer(settings, logger)
     notifier = _build_notifier()
@@ -39,7 +37,6 @@ def build_pipeline_use_case() -> GenerateDailyVideo:
         script_generator=script_generator,
         audio_synthesizer=audio,
         subtitle_generator=subtitles,
-        background_generator=background,
         metadata_generator=metadata,
         video_composer=video,
         publisher=publisher,

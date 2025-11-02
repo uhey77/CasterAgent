@@ -3,13 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from daily2video.core.settings import get_settings
-from daily2video.domain.models import (
-    AudioAsset,
-    DialogueSegment,
-    GeneratedImage,
-    SubtitleFile,
-    SubtitleSegment,
-)
+from daily2video.domain.models import AudioAsset, DialogueSegment, SubtitleFile, SubtitleSegment
 from daily2video.infrastructure.clients.hedra_client import HedraGenerationStatus
 from daily2video.infrastructure.services import hedra_video_composer
 from daily2video.infrastructure.services.hedra_video_composer import HedraVideoComposer
@@ -83,9 +77,7 @@ def test_hedra_video_composer_builds_timeline(tmp_path, monkeypatch):
                 SubtitleSegment(4.0, 8.0, "こんばんは"),
             ],
         )
-        background = GeneratedImage(article_id=100, file_path=tmp_path / "bg.png")
-
-        video_asset = composer.compose(audio_asset, subtitles, background)
+        video_asset = composer.compose(audio_asset, subtitles)
 
         assert client.created_assets == ["article-100"]
         assert client.uploaded_assets[0][0] == "asset-1"

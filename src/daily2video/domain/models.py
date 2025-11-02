@@ -62,12 +62,6 @@ class SubtitleFile:
 
 
 @dataclass(slots=True)
-class GeneratedImage:
-    article_id: int
-    file_path: Path
-
-
-@dataclass(slots=True)
 class VideoAsset:
     article_id: int
     file_path: Path
