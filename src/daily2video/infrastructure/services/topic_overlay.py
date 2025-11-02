@@ -472,6 +472,16 @@ def _extract_items_from_article(article_text: str, seen: set[str]) -> List[Tuple
             category = _categorize_research(title, current_section or raw_line)
             items.append((category, title))
             seen.add(title)
+            continue
+
+        match = re.match(r"^\*\*([^*]+)\*\*", line)
+        if match:
+            title = match.group(1).strip()
+            if not title or title in seen:
+                continue
+            category = _categorize_research(title, current_section or raw_line)
+            items.append((category, title))
+            seen.add(title)
 
         if len(items) >= 20:
             break
