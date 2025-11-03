@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -8,6 +9,7 @@ import pytest
 from daily2video.application.use_cases.generate_daily_video import (
     GenerateDailyVideo,
     GenerateDailyVideoInput,
+    _now_jst,
 )
 from daily2video.domain.interfaces import (
     ArticleRepository,
@@ -159,7 +161,8 @@ def test_generate_daily_video_success(sample_article: Article) -> None:
 
     assert result.status.status == "uploaded"
     assert result.video and result.video.file_path.name == "video.mp4"
-    assert result.metadata and result.metadata.title == "AI Daily ニュース"
+    assert result.metadata and "AI Daily ニュース" in result.metadata.title
+    assert _now_jst().strftime("%Y年%m月%d日") in result.metadata.title
     assert result.youtube_video_id == "youtube-video-id"
 
 
@@ -167,3 +170,31 @@ def test_generate_daily_video_missing_article() -> None:
     use_case = build_use_case(None)
     with pytest.raises(PipelineError):
         use_case.execute(GenerateDailyVideoInput())
+
+
+def test_should_upload_video_allows_past_date(sample_article: Article) -> None:
+    use_case = build_use_case(sample_article)
+    sample_article.published_at = datetime.now(timezone.utc) - timedelta(days=2)
+    assert use_case._should_upload_video(sample_article, None)  # pylint: disable=protected-access
+
+
+def test_should_upload_video_blocks_future_date(sample_article: Article) -> None:
+    use_case = build_use_case(sample_article)
+    sample_article.published_at = datetime.now(timezone.utc) + timedelta(days=1)
+    assert not use_case._should_upload_video(sample_article, None)  # pylint: disable=protected-access
+
+
+def test_should_upload_video_allows_when_title_matches_today(sample_article: Article) -> None:
+    use_case = build_use_case(sample_article)
+    now_jst = _now_jst()
+    sample_article.published_at = now_jst + timedelta(days=1)
+    today_str = now_jst.strftime("%Y年%m月%d日")
+    metadata = VideoMetadata(
+        article_id=sample_article.article_id,
+        title=f"AI Daily - {today_str}",
+        description="desc",
+        tags=[],
+        category_id="28",
+        privacy_status="public",
+    )
+    assert use_case._should_upload_video(sample_article, metadata)  # pylint: disable=protected-access

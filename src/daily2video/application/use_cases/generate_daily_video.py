@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+import json
+import re
+from datetime import datetime, timezone, timedelta, date
 from typing import Optional
 
 from ...domain.interfaces import (
@@ -87,6 +89,7 @@ class GenerateDailyVideo:
             self._logger.log({"event": "subtitles_generated", "file_path": str(subtitles.file_path)})
 
             metadata = self._metadata_generator.build_metadata(article, script)
+            self._ensure_metadata_title_date(metadata)
             status.status = "metadata_ready"
             self._logger.log({"event": "metadata_generated", "title": metadata.title})
 
@@ -94,7 +97,7 @@ class GenerateDailyVideo:
             status.status = "video_ready"
             self._logger.log({"event": "video_composed", "file_path": str(video.file_path)})
 
-            should_upload = self._should_upload_video(article)
+            should_upload = self._should_upload_video(article, metadata)
             youtube_video_id = None
 
             if should_upload:
@@ -106,17 +109,19 @@ class GenerateDailyVideo:
                     status.status = "video_saved"
             else:
                 status.status = "video_saved"
-                self._logger.log(
-                    {
-                        "event": "upload_skipped",
-                        "reason": "article_date_mismatch",
-                        "article_id": article.article_id,
-                        "article_published_at": (
-                            article.published_at.isoformat() if article.published_at else None
-                        ),
-                    }
-                )
-                status.notes.append("YouTubeアップロードはESA記事の日付不一致のためスキップされました")
+                skip_payload = {
+                    "event": "upload_skipped",
+                    "article_id": article.article_id,
+                    "article_published_at": (
+                        article.published_at.isoformat() if article.published_at else None
+                    ),
+                }
+                metadata_date = self._extract_metadata_date(metadata)
+                if metadata_date:
+                    skip_payload["metadata_date"] = metadata_date.isoformat()
+                skip_payload["reason"] = "article_date_in_future"
+                self._logger.log(skip_payload)
+                status.notes.append("YouTubeアップロードはESA記事の日付が未来日のためスキップされました")
 
             status.completed_at = _now_jst()
             self._notifier.notify("AI-Daily動画の自動生成が完了しました", extra={"status": status.status})
@@ -139,8 +144,14 @@ class GenerateDailyVideo:
             raise PipelineError("article", "対象の記事が見つかりませんでした")
         return article
 
-    def _should_upload_video(self, article: Article) -> bool:
-        """ESAの記事日付が当日と一致するときだけアップロードを許可"""
+    def _should_upload_video(self, article: Article, metadata: VideoMetadata | None) -> bool:
+        """メタデータのタイトル日付か記事日付に基づいてアップロード可否を判断"""
+        current_date = _now_jst().date()
+
+        metadata_date = self._extract_metadata_date(metadata)
+        if metadata_date and metadata_date == current_date:
+            return True
+
         if not article:
             return False
         if not article.published_at:
@@ -151,5 +162,41 @@ class GenerateDailyVideo:
         else:
             published_date = article.published_at.date()
 
-        current_date = _now_jst().date()
-        return published_date == current_date
+        return published_date <= current_date
+
+    def _ensure_metadata_title_date(self, metadata: VideoMetadata | None) -> None:
+        if not metadata:
+            return
+        today_str = _now_jst().strftime("%Y年%m月%d日")
+        pattern = r"\d{4}年\d{1,2}月\d{1,2}日"
+        if metadata.title:
+            if re.search(pattern, metadata.title):
+                metadata.title = re.sub(pattern, today_str, metadata.title)
+            else:
+                metadata.title = f"{metadata.title} - {today_str}"
+        else:
+            metadata.title = today_str
+
+        if metadata.file_path:
+            payload = {
+                "title": metadata.title,
+                "description": metadata.description,
+                "tags": metadata.tags,
+                "category_id": metadata.category_id,
+                "privacy_status": metadata.privacy_status,
+                "language": metadata.language,
+            }
+            metadata.file_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _extract_metadata_date(metadata: VideoMetadata | None) -> date | None:
+        if not metadata or not metadata.title:
+            return None
+        match = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", metadata.title)
+        if not match:
+            return None
+        try:
+            year, month, day = map(int, match.groups())
+            return date(year, month, day)
+        except ValueError:
+            return None

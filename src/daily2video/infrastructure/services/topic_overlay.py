@@ -472,42 +472,54 @@ def _extract_items_from_script(script_text: str) -> List[Tuple[str, str]]:
     items: List[Tuple[str, str]] = []
     seen: set[str] = set()
 
+    def add_item(title: str, line: str) -> None:
+        normalized = _normalize_title(title)
+        if normalized in seen:
+            return
+        if not title or len(title) < 3 or title.isdigit():
+            return
+
+        skip_phrases = {
+            "ai daily",
+            "こちら",
+            "まず",
+            "次に",
+            "最後に",
+            "さらに",
+            "bridge",
+            "grpo",
+            "m2po",
+            "hudiff",
+        }
+        if normalized in skip_phrases:
+            return
+
+        category = _categorize_research(title, line)
+        items.append((category, title))
+        seen.add(normalized)
+
+    # 優先的に【タイトル】形式を抽出
+    for line in script_text.splitlines():
+        for match in re.findall(r"【([^】]+)】", line):
+            add_item(match.strip(), line)
+            if len(items) >= 20:
+                break
+        if len(items) >= 20:
+            break
+
+    if items:
+        return items
+
+    # fallback: 引用符やMarkdownで囲まれたタイトルを抽出
     for line in script_text.splitlines():
         matches_jp = re.findall(r"「([^」]+)」", line)
         matches_md = re.findall(r"\*\*([^*]+)\*\*", line)
         matches = matches_jp + matches_md
 
         for match in matches:
-            title = match.strip()
-            if not title or len(title) < 3 or title.isdigit():
-                continue
-
-            normalized = _normalize_title(title)
-            if normalized in seen:
-                continue
-
-            skip_phrases = {
-                "ai daily",
-                "こちら",
-                "まず",
-                "次に",
-                "最後に",
-                "さらに",
-                "bridge",
-                "grpo",
-                "m2po",
-                "hudiff",
-            }
-            if normalized in skip_phrases:
-                continue
-
-            category = _categorize_research(title, line)
-            items.append((category, title))
-            seen.add(normalized)
-
+            add_item(match.strip(), line)
             if len(items) >= 20:
                 break
-
         if len(items) >= 20:
             break
 
