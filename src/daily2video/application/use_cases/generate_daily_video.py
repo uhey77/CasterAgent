@@ -167,15 +167,8 @@ class GenerateDailyVideo:
     def _ensure_metadata_title_date(self, metadata: VideoMetadata | None) -> None:
         if not metadata:
             return
-        today_str = _now_jst().strftime("%Y年%m月%d日")
-        pattern = r"\d{4}年\d{1,2}月\d{1,2}日"
-        if metadata.title:
-            if re.search(pattern, metadata.title):
-                metadata.title = re.sub(pattern, today_str, metadata.title)
-            else:
-                metadata.title = f"{metadata.title} - {today_str}"
-        else:
-            metadata.title = today_str
+        today_str = _now_jst().strftime("%Y-%m-%d")
+        metadata.title = f"AI Daily—{today_str}"
 
         if metadata.file_path:
             payload = {
@@ -192,7 +185,7 @@ class GenerateDailyVideo:
     def _extract_metadata_date(metadata: VideoMetadata | None) -> date | None:
         if not metadata or not metadata.title:
             return None
-        match = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", metadata.title)
+        match = re.search(r"(\d{4})-(\d{2})-(\d{2})", metadata.title)
         if not match:
             return None
         try:
