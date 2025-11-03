@@ -42,6 +42,7 @@ def build_pipeline_use_case() -> GenerateDailyVideo:
         publisher=publisher,
         logger=logger,
         notifier=notifier,
+        storage=settings.storage,
     )
 
 

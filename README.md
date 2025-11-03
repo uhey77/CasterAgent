@@ -7,7 +7,8 @@ AI Daily 2 Video は、esa の「AI Daily」記事を読み上げ付きの動画
 - OpenAI API を使ったスクリプト生成／音声合成／字幕生成／イメージ生成
 - MoviePy/Sync Labs/Hedra を使った動画合成
 - YouTube Data API による自動アップロード（タイトルは `AI Daily—YYYY-MM-DD` 形式で固定）
-- Slack Incoming Webhook による完了／エラー通知（アップロード成功時は動画 URL を添付）
+- 同日内の再実行時は YouTube アップロードを自動スキップ（1日1本運用）
+- Slack Incoming Webhook による完了／エラー通知（アップロード成功時は動画 URL を添付、同日再実行時は通知なし）
 
 ## ディレクトリ構成
 
@@ -108,8 +109,8 @@ CI やローカル開発中に外部 API へアクセスしたくない場合は
 - **YouTube へのアップロードに失敗する**  
   リフレッシュトークンの失効が考えられます。Google Cloud Console 上で OAuth クライアントを再度承認し、新しい `GOOGLE_REFRESH_TOKEN` を `.env` に設定してください。Slack 通知にはエラー内容が含まれます。
 
+- **同じ日に複数回パイプラインを走らせたい**  
+  2回目以降の実行では `data/state/last_upload.json` を確認し、当日分が既に投稿済みなら YouTube アップロードと Slack 通知を自動でスキップします。どうしても再投稿したい場合はファイルを削除して再実行してください。
+
 - **背景生成やリップシンクを切り替えたい**  
   Sync Labs と Hedra の設定値は `config/` 配下の JSON で上書き可能です。環境変数の説明はコメントと README の該当セクションを参照してください。
-
----
-Happy automating!

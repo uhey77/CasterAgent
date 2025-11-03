@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import re
+from pathlib import Path
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional
 
@@ -24,6 +25,7 @@ from ...domain.models import (
     VideoAsset,
     VideoMetadata,
 )
+from ...core.settings import StoragePaths
 
 JST = timezone(timedelta(hours=9))
 
@@ -57,6 +59,7 @@ class GenerateDailyVideo:
         publisher: VideoPublisher,
         logger: PipelineLogger,
         notifier: Notifier,
+        storage: StoragePaths,
     ) -> None:
         self._article_repo = article_repo
         self._script_generator = script_generator
@@ -67,11 +70,13 @@ class GenerateDailyVideo:
         self._publisher = publisher
         self._logger = logger
         self._notifier = notifier
+        self._storage = storage
 
     def execute(self, command: GenerateDailyVideoInput) -> GenerateDailyVideoResult:
         status = PipelineStatus(status="started", started_at=_now_jst())
         self._logger.log({"event": "pipeline_started", "started_at": status.started_at.isoformat()})
         try:
+            send_notification = True
             article = self._resolve_article(command.article_id)
             status.status = "article_ready"
             self._logger.log({"event": "article_selected", "article_id": article.article_id})
@@ -97,7 +102,7 @@ class GenerateDailyVideo:
             status.status = "video_ready"
             self._logger.log({"event": "video_composed", "file_path": str(video.file_path)})
 
-            should_upload = self._should_upload_video(article, metadata)
+            should_upload, skip_reason = self._should_upload_video(article, metadata)
             youtube_video_id = None
 
             if should_upload:
@@ -105,6 +110,7 @@ class GenerateDailyVideo:
                 if youtube_video_id:
                     status.status = "uploaded"
                     self._logger.log({"event": "video_uploaded", "youtube_id": youtube_video_id})
+                    self._mark_uploaded_today()
                 else:
                     status.status = "video_saved"
             else:
@@ -119,21 +125,28 @@ class GenerateDailyVideo:
                 metadata_date = self._extract_metadata_date(metadata)
                 if metadata_date:
                     skip_payload["metadata_date"] = metadata_date.isoformat()
-                skip_payload["reason"] = "article_date_in_future"
+                skip_payload["reason"] = skip_reason or "unknown"
                 self._logger.log(skip_payload)
-                status.notes.append("YouTubeアップロードはESA記事の日付が未来日のためスキップされました")
+                if skip_reason == "article_date_in_future":
+                    status.notes.append("YouTubeアップロードはESA記事の日付が未来日のためスキップされました")
+                elif skip_reason == "already_uploaded_today":
+                    status.notes.append("YouTubeアップロードは当日分がすでに投稿済みのためスキップされました")
+                    send_notification = False
 
             status.completed_at = _now_jst()
-            notification_extra = {"status": status.status}
-            if youtube_video_id:
-                notification_extra["youtube_id"] = youtube_video_id
-                notification_extra["youtube_url"] = f"https://youtu.be/{youtube_video_id}"
-                if metadata and metadata.title:
-                    notification_extra["title"] = metadata.title
-            self._notifier.notify(
-                "AI-Daily動画の自動生成が完了しました",
-                extra=notification_extra,
-            )
+            if send_notification:
+                notification_extra = {"status": status.status}
+                if youtube_video_id:
+                    notification_extra["youtube_id"] = youtube_video_id
+                    notification_extra["youtube_url"] = f"https://youtu.be/{youtube_video_id}"
+                    if metadata and metadata.title:
+                        notification_extra["title"] = metadata.title
+                elif not should_upload and skip_reason:
+                    notification_extra["reason"] = skip_reason
+                self._notifier.notify(
+                    "AI-Daily動画の自動生成が完了しました",
+                    extra=notification_extra,
+                )
             return GenerateDailyVideoResult(status=status, video=video, metadata=metadata, youtube_video_id=youtube_video_id)
         except Exception as exc:  # pylint: disable=broad-except
             status.status = "failed"
@@ -153,25 +166,30 @@ class GenerateDailyVideo:
             raise PipelineError("article", "対象の記事が見つかりませんでした")
         return article
 
-    def _should_upload_video(self, article: Article, metadata: VideoMetadata | None) -> bool:
+    def _should_upload_video(self, article: Article, metadata: VideoMetadata | None) -> tuple[bool, Optional[str]]:
         """メタデータのタイトル日付か記事日付に基づいてアップロード可否を判断"""
         current_date = _now_jst().date()
 
+        if self._has_uploaded_today():
+            return False, "already_uploaded_today"
+
         metadata_date = self._extract_metadata_date(metadata)
         if metadata_date and metadata_date == current_date:
-            return True
+            return True, None
 
         if not article:
-            return False
+            return False, "article_missing"
         if not article.published_at:
-            return True
+            return True, None
 
         if article.published_at.tzinfo:
             published_date = article.published_at.astimezone(JST).date()
         else:
             published_date = article.published_at.date()
 
-        return published_date <= current_date
+        if published_date <= current_date:
+            return True, None
+        return False, "article_date_in_future"
 
     def _ensure_metadata_title_date(self, metadata: VideoMetadata | None) -> None:
         if not metadata:
@@ -202,3 +220,29 @@ class GenerateDailyVideo:
             return date(year, month, day)
         except ValueError:
             return None
+
+    def _upload_marker_path(self) -> Path:
+        return self._storage.state_dir / "last_upload.json"
+
+    def _has_uploaded_today(self) -> bool:
+        marker = self._upload_marker_path()
+        if not marker.exists():
+            return False
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        date_str = payload.get("date")
+        if not date_str:
+            return False
+        try:
+            last_date = datetime.fromisoformat(date_str).date()
+        except ValueError:
+            return False
+        return last_date == _now_jst().date()
+
+    def _mark_uploaded_today(self) -> None:
+        marker = self._upload_marker_path()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"date": _now_jst().date().isoformat()}
+        marker.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")

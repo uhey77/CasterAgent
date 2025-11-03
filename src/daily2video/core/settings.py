@@ -40,6 +40,10 @@ class StoragePaths(BaseModel):
     def articles_dir(self) -> Path:
         return self.root / "articles"
 
+    @property
+    def state_dir(self) -> Path:
+        return self.root / "state"
+
     def ensure_directories(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         for child in (
@@ -50,6 +54,7 @@ class StoragePaths(BaseModel):
             self.videos_dir,
             self.metadata_dir,
             self.articles_dir,
+            self.state_dir,
         ):
             child.mkdir(parents=True, exist_ok=True)
 
