@@ -34,3 +34,17 @@ def test_extract_research_items_falls_back_to_article_when_script_empty() -> Non
     titles = [title for _, title in items]
 
     assert titles == ["Alpha", "Beta"]
+
+
+def test_extract_research_items_supports_bracket_titles() -> None:
+    script_text = """
+    まずは【Alpha】について見ていきましょう。
+    続いて、【Beta】の研究です。
+    最後に、【Gamma】を紹介します。
+    """
+    article_text = None
+
+    items = _extract_research_items(script_text, article_text)
+    titles = [title for _, title in items]
+
+    assert titles == ["Alpha", "Beta", "Gamma"]

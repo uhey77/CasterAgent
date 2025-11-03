@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -55,6 +56,31 @@ class StoragePaths(BaseModel):
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ENV_FILE = PROJECT_ROOT / ".env"
+
+
+def _load_env_file(path: Path) -> None:
+    if not path or not path.exists():
+        return
+    try:
+        contents = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+
+    for raw_line in contents.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+_load_env_file(ENV_FILE)
 
 
 class AppSettings(BaseSettings):

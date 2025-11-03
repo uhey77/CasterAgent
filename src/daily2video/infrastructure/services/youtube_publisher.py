@@ -88,10 +88,6 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
         return any(item.get("reason") == "youtubeSignupRequired" for item in errors)
 
     def _build_service(self):
-        service_account_service = self._build_service_account_service()
-        if service_account_service is not None:
-            return service_account_service
-
         refresh_service = self._build_refresh_token_service()
         if refresh_service is not None:
             return refresh_service
@@ -99,6 +95,10 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
         oauth_service = self._build_oauth2_service()
         if oauth_service is not None:
             return oauth_service
+
+        service_account_service = self._build_service_account_service()
+        if service_account_service is not None:
+            return service_account_service
 
         raise RuntimeError(
             "YouTube upload requires OAuth認証情報が必要です。google_client_id/google_client_secretと有効なリフレッシュトークン、"
