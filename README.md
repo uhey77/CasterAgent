@@ -1,112 +1,115 @@
 # AI Daily 2 Video
 
-AI Daily 2 Video is a clean-architecture FastAPI service that converts esa "AI-Daily" posts into narrated videos ready for YouTube. The automation flow fetches the latest article, drafts a conversational script, generates voice, subtitles, a background illustration, composes the video, and optionally uploads it to YouTube. All AI capabilities rely solely on the OpenAI API family (chat, TTS, transcription, image generation).
+AI Daily 2 Video は、esa の「AI Daily」記事を読み上げ付きの動画に変換し、必要に応じて YouTube へ自動投稿する FastAPI ベースの自動化パイプラインです。記事取得からスクリプト生成、音声合成、字幕生成、背景画像生成、動画合成、Slack 通知までを一括で処理します。
 
-## Project Layout
+## 主な機能
+- esa API から最新記事を取得（任意の記事 ID での指定も可能）
+- OpenAI API を使ったスクリプト生成／音声合成／字幕生成／イメージ生成
+- MoviePy/Sync Labs/Hedra を使った動画合成
+- YouTube Data API による自動アップロード（タイトルは `AI Daily—YYYY-MM-DD` 形式で固定）
+- Slack Incoming Webhook による完了／エラー通知（アップロード成功時は動画 URL を添付）
+
+## ディレクトリ構成
 
 ```
-src/ai_daily2video/
-├── app.py                 # FastAPI bootstrap
-├── core/                  # Configuration & OpenAI client factories
-├── domain/                # Entities and abstract contracts (DDD)
-├── application/           # Use cases orchestrating the workflow
-├── infrastructure/        # External service implementations (OpenAI, ESA, Google APIs, MoviePy)
-└── presentation/          # FastAPI routers and dependency wiring
+src/daily2video/
+├── app.py                 # FastAPI エントリーポイント
+├── core/                  # 設定読み込み・共通コンポーネント
+├── domain/                # エンティティと抽象インターフェース
+├── application/           # ユースケース（パイプライン実装）
+├── infrastructure/        # 外部サービス実装（OpenAI/Google/esa など）
+└── presentation/          # FastAPI ルーターや依存性注入
 ```
 
-## Prerequisites
+生成物はすべて `data/` 配下に保存されます（`scripts/`、`audio/`、`subtitles/`、`images/`、`videos/`、`metadata/`）。
 
-- Python 3.12+
-- [uv](https://github.com/astral-sh/uv) package manager
-- OpenAI API key with access to GPT-4o, Whisper, and image generation endpoints
-- ESA API token and team information
-- (Optional) Google Cloud service account for Sheets logging and YouTube uploads
-- (Optional) Slack Incoming Webhook for notifications
-- (Optional) Hedra API key plus character IDs if you want photoreal conversational avatars instead of static slides
-- (Optional) Sync Labs API key and a reference video for their lipsync service
+## 前提条件
+- macOS/Linux/WSL 上で Python 3.12 以上が実行できること
+- パッケージマネージャーとして [uv](https://github.com/astral-sh/uv) を使用
+- OpenAI API キー（GPT-4o、Audio API、Image API を利用できる権限）
+- esa API トークン／チーム／カテゴリ情報
+- （任意）YouTube アップロード用の Google OAuth クライアント & リフレッシュトークン
+- （任意）Slack Incoming Webhook URL
+- （任意）Sync Labs API キー、参照動画（リップシンク用）
+- （任意）Hedra API キー、キャラクター ID（アバター動画用）
 
-## Getting Started
+## セットアップ手順
 
 ```bash
-# Install dependencies with uv
+# 依存パッケージのインストール
 uv sync
 
-# Configure environment
+# 環境変数ファイルのコピー
 cp .env.example .env
-# Edit .env with OpenAI/ESA/Google credentials
+```
 
-# Run API server
+1. `.env` を開き、必要なキーを設定します（下記「環境変数一覧」を参照）。
+2. esa、OpenAI、Google などの資格情報ファイル（JSON）が必要な場合は `credentials/` など任意の場所に配置し、パスを `.env` に指定します。
+3. Slack 通知を使う場合は、Slack ワークスペースで「Incoming Webhooks」アプリを追加し、通知したいチャンネルを選択して発行された URL を `SLACK_WEBHOOK_URL` に設定します。
+
+> Slack Webhook の取得手順  
+> 1. [Slack App Directory](https://slack.com/apps) から「Incoming Webhooks」を追加  
+> 2. ワークスペースと通知チャンネルを選択  
+> 3. 生成された `https://hooks.slack.com/services/...` を `.env` に貼り付け  
+> （必要に応じてワークスペース管理者の承認が求められます）
+
+## 環境変数一覧（抜粋）
+
+| 必須 | 変数名 | 説明 |
+|------|--------|------|
+| ✅ | `OPENAI_API_KEY` | OpenAI API キー |
+| ✅ | `ESA_API_TOKEN` / `ESA_TEAM` / `ESA_CATEGORY` | esa 記事の取得に使用 |
+| ✅ | `OUTPUT_ROOT` | 生成物の保存先（既定値: `data`） |
+| 任意 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` | YouTube アップロードに必須 |
+| 任意 | `SLACK_WEBHOOK_URL` | Slack 通知（未設定の場合はアプリログへフォールバック） |
+| 任意 | `SYNC_LABS_*` | Sync Labs リップシンク機能を有効化する場合 |
+| 任意 | `HEDRA_*` | Hedra アバター機能を有効化する場合 |
+
+詳細は `.env.example` と `src/daily2video/core/settings.py` を参照してください。
+
+## サーバーの起動
+
+```bash
 uv run python main.py
-# or
-uv run uvicorn ai_daily2video.app:app --reload
+# または
+uv run uvicorn daily2video.app:app --reload
 ```
 
-The API exposes:
-- `GET /health` – readiness probe
-- `POST /pipeline/run` – triggers the end-to-end generation. Provide `{ "article_id": 123 }` to process a specific esa post or omit to use the latest.
+エンドポイント:
+- `GET /health` – 動作確認用
+- `POST /pipeline/run` – 動画生成パイプラインの実行（`{"article_id": 123}` で記事指定、未指定なら最新記事）
 
-Artifacts (scripts, audio, subtitles, backgrounds, videos, metadata) are stored under `data/` by default.
+## 動画生成の流れ
+1. esa から記事を取得
+2. OpenAI でスクリプト生成
+3. Text-to-Speech で音声化し、Whisper で字幕生成
+4. 画像生成（または外部サービス）で背景を作成
+5. MoviePy/Sync Labs/Hedra で動画を合成
+6. `AI Daily—YYYY-MM-DD` のタイトルでメタデータを調整し JSON に保存
+7. Google 資格情報があれば YouTube にアップロード
+8. Slack Webhook が設定されていれば、完了ステータスと YouTube URL を通知
 
-## Tooling
+生成されたファイルは `data/` 配下に保存され、YouTube へアップロードした場合は Slack 通知で共有リンクが送信されます。
 
-- **FastAPI** for HTTP interface
-- **Ruff** for linting (`uv run ruff check src tests`)
-- **Pytest** for automated tests (`uv run pytest`)
-- **MoviePy** for video composition
-- **Sync Labs API** for lipsync rendering when `SYNC_LABS_API_KEY` plus a template video are configured
-- **Hedra API** for two-speaker avatar rendering when `HEDRA_API_KEY` is configured
+## テスト & Lint
 
-## Notes
-
-- Background artwork is generated automatically via `gpt-image-1` and cached per article.
-- When Google credentials are absent, uploads are skipped gracefully. The composed video remains in `data/videos`.
-- Ensure ImageMagick is installed if MoviePy requires it for text rendering on your platform.
-- When Sync Labs credentials are provided the pipeline uploads the mixed audio track (and optional local video) to Sync Labs for lipsync rendering, waits for the output, then continues with topic overlays and delivery.
-- When Hedra credentials are provided, the pipeline uploads the mixed audio track and per-line timing to Hedra, polls until the avatar video is ready, then downloads it before publishing. Without Sync Labs or Hedra configuration the legacy MoviePy-based slideshow renderer is used instead.
-
-### Sync Labs configuration (optional)
-
-```
-SYNC_LABS_API_KEY=sk_sync_...
-# Provide either a remote video URL or a local file path for the anchor footage
-SYNC_LABS_VIDEO_URL=https://example.com/anchor.mp4
-# SYNC_LABS_VIDEO_PATH=assets/anchor.mp4
-
-# Optional tuning
-SYNC_LABS_MODEL=lipsync-2
-SYNC_LABS_SYNC_MODE=cut_off            # bounce | loop | cut_off | silence | remap
-SYNC_LABS_ACTIVE_SPEAKER=false         # enable auto speaker detection
-SYNC_LABS_TEMPERATURE=0.4              # expression intensity, 0.0-1.0
-SYNC_LABS_OCCLUSION_DETECTION=false    # slows generation but handles hand-over-mouth cases
+```bash
+uv run pytest            # 単体テスト
+uv run ruff check src    # コードスタイルチェック
 ```
 
-Additional polling or default values can be tweaked in `config/sync_labs.json`.
+CI やローカル開発中に外部 API へアクセスしたくない場合は、適宜モックを利用してください。
 
-### Hedra configuration (optional)
+## よくある質問
 
-```
-HEDRA_API_KEY=sk_hedra_...
-HEDRA_CHARACTER_A=chr_anchor_a        # Speaker A avatar
-HEDRA_CHARACTER_B=chr_anchor_b        # Speaker B avatar
-# Optional fine-tuning
-HEDRA_SCENE_ID=scn_split_screen
-HEDRA_VIDEO_WIDTH=1920
-HEDRA_VIDEO_HEIGHT=1080
-HEDRA_CONVERSATION_ENDPOINT=/videos
-HEDRA_STATUS_ENDPOINT=/videos
-HEDRA_POLL_INTERVAL_SECONDS=5
-HEDRA_POLL_TIMEOUT_SECONDS=600
-```
+- **Slack に通知が来ない**  
+  `SLACK_WEBHOOK_URL` が空または無効のときは、ログにのみメッセージを出力します。URL が正しいか、Webhook アプリがチャンネルへ投稿できる権限を持っているか確認してください。
 
-Consult Hedra's dashboard for available character/scene identifiers. If your tenant exposes different endpoints, override the `_ENDPOINT` variables accordingly.
+- **YouTube へのアップロードに失敗する**  
+  リフレッシュトークンの失効が考えられます。Google Cloud Console 上で OAuth クライアントを再度承認し、新しい `GOOGLE_REFRESH_TOKEN` を `.env` に設定してください。Slack 通知にはエラー内容が含まれます。
 
-## Testing
-
-```
-uv run pytest
-```
-
-Mocked responses are recommended for integration tests to avoid hitting external APIs during CI.
+- **背景生成やリップシンクを切り替えたい**  
+  Sync Labs と Hedra の設定値は `config/` 配下の JSON で上書き可能です。環境変数の説明はコメントと README の該当セクションを参照してください。
 
 ---
 Happy automating!
