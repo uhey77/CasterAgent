@@ -124,7 +124,16 @@ class GenerateDailyVideo:
                 status.notes.append("YouTubeアップロードはESA記事の日付が未来日のためスキップされました")
 
             status.completed_at = _now_jst()
-            self._notifier.notify("AI-Daily動画の自動生成が完了しました", extra={"status": status.status})
+            notification_extra = {"status": status.status}
+            if youtube_video_id:
+                notification_extra["youtube_id"] = youtube_video_id
+                notification_extra["youtube_url"] = f"https://youtu.be/{youtube_video_id}"
+                if metadata and metadata.title:
+                    notification_extra["title"] = metadata.title
+            self._notifier.notify(
+                "AI-Daily動画の自動生成が完了しました",
+                extra=notification_extra,
+            )
             return GenerateDailyVideoResult(status=status, video=video, metadata=metadata, youtube_video_id=youtube_video_id)
         except Exception as exc:  # pylint: disable=broad-except
             status.status = "failed"
