@@ -5,9 +5,7 @@ import logging
 from ...core.settings import get_settings
 from ...domain.interfaces import Notifier, PipelineLogger, VideoComposer, VideoPublisher
 from ...infrastructure.clients.esa_client import EsaRestClient
-from ...infrastructure.clients.hedra_client import HedraClient
 from ...infrastructure.clients.sync_labs_client import SyncLabsClient, SyncVideoSource
-from ...infrastructure.services.hedra_video_composer import HedraVideoComposer
 from ...infrastructure.services.logging_service import build_pipeline_logger
 from ...infrastructure.services.moviepy_video_composer import MoviePyVideoComposer
 from ...infrastructure.services.noop_publisher import NoOpPublisher
@@ -79,21 +77,6 @@ def _build_video_composer(settings, logger: PipelineLogger) -> VideoComposer:
             logging.warning("Falling back because Sync Labs is unavailable: %s", exc)
             logger.log({"event": "sync_labs_unavailable", "error": str(exc)})
 
-    if settings.hedra_api_key:
-        try:
-            client = HedraClient(
-                api_key=settings.hedra_api_key,
-                base_url=settings.hedra_base_url,
-                assets_endpoint=settings.hedra_assets_endpoint,
-                generation_endpoint=settings.hedra_generation_endpoint,
-                status_endpoint=settings.hedra_status_endpoint,
-                poll_interval=settings.hedra_poll_interval_seconds,
-                poll_timeout=settings.hedra_poll_timeout_seconds,
-            )
-            return HedraVideoComposer(client)
-        except Exception as exc:  # pragma: no cover - defensive fallback
-            logging.warning("Falling back to MoviePy composer because Hedra is unavailable: %s", exc)
-            logger.log({"event": "hedra_unavailable", "error": str(exc)})
     return MoviePyVideoComposer()
 
 
