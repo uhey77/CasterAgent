@@ -68,6 +68,9 @@ METADATA_USER_TEMPLATE = """
 - 記事タイトル: {title}
 - 公開日: {date_str}
 
+# 記事本文（Markdown）
+{body}
+
 # 台本
 {script}
 
@@ -76,7 +79,9 @@ METADATA_USER_TEMPLATE = """
 - `title`, `description`, `tags`(配列), `category_id`(文字列), `privacy_status`(public|unlisted|private) を含めてください
 - タイトルには{date_str}の日付を含めてください
 - 説明文には記事の出典URLを含めてください（URLが分からない場合は省略）
-- 説明文には動画内で紹介した各研究の書誌情報（タイトル、著者、所属、掲載先/投稿日、DOIやURLなど判明している項目）を箇条書きでまとめてください
+- 説明文の冒頭に、記事本文に記載されている各研究の書誌情報（タイトル、著者、所属、掲載先/投稿日、DOIやURLなど判明している項目）を箇条書きで整理してください
+- 各書誌項目は「タイトル / 著者 / 所属 / 掲載先・日付 / DOI / URL」の順に並べ、判明している項目だけを出力してください
+- 書誌情報は記事本文から抽出できた値のみを使用し、「不明」「なし」などのプレースホルダは書かないでください。項目が無い場合はそのフィールドを省略してください
 - 説明文には書誌情報に続いて動画の概要とハイライトを200〜400文字で添えてください
 - タグは最大10個、日本語で短くしてください
 """
@@ -138,6 +143,7 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
                     "content": METADATA_USER_TEMPLATE.format(
                         title=article.title,
                         script=script.raw_text,
+                        body=article.markdown_body,
                         date_str=date_str,
                     ),
                 },
