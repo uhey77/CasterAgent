@@ -79,8 +79,14 @@ METADATA_USER_TEMPLATE = """
 - `title`, `description`, `tags`(配列), `category_id`(文字列), `privacy_status`(public|unlisted|private) を含めてください
 - タイトルには{date_str}の日付を含めてください
 - 説明文には記事の出典URLを含めてください（URLが分からない場合は省略）
-- 説明文の冒頭に、記事本文に記載されている各研究の書誌情報（タイトル、著者、所属、掲載先/投稿日、DOIやURLなど判明している項目）を箇条書きで整理してください
-- 各書誌項目は「タイトル / 著者 / 所属 / 掲載先・日付 / DOI / URL」の順に並べ、判明している項目だけを出力してください
+- 説明文の冒頭に、記事本文に記載されている各研究の書誌情報（タイトル、著者、所属、掲載先/投稿日、DOIやURLなど判明している項目）をMarkdownの箇条書きで整理してください
+- 書誌の1項目は以下の形式を用い、見やすく改行してください（判明している項目だけを出力）
+  - `- **タイトル**: ...`
+  - `  - 著者: ...`
+  - `  - 所属: ...`
+  - `  - 掲載先・日付: ...`
+  - `  - DOI: <...>`
+  - `  - URL: <...>`
 - 書誌情報は記事本文から抽出できた値のみを使用し、「不明」「なし」などのプレースホルダは書かないでください。項目が無い場合はそのフィールドを省略してください
 - 説明文には書誌情報に続いて動画の概要とハイライトを200〜400文字で添えてください
 - タグは最大10個、日本語で短くしてください
@@ -94,17 +100,7 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
 
     def build_script(self, article: Article) -> Script:
         date_str = self._format_date(article.published_at)
-        character_id = (
-            self._settings.hedra_character_id
-            or self._settings.hedra_character_a
-            or ""
-        )
-        if character_id:
-            narration_context = (
-                f"HedraのキャラクターID {character_id} に紐づく人物が、プロのナレーターとして落ち着いた声で語る想定で書いてください。"
-            )
-        else:
-            narration_context = "プロのナレーターが落ち着いて語る想定で書いてください。"
+        narration_context = "プロのナレーターが落ち着いて語る想定で書いてください。"
         
         response = self._client.chat.completions.create(
             model="gpt-4o-mini",
