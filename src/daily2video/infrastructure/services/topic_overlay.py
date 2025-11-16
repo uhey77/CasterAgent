@@ -607,14 +607,18 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[
             return
 
         tentative = current_line + fragment
-        if not current_line or _measure_text(tentative, font) <= max_width:
+        if _measure_text(tentative, font) <= max_width:
             current_line = tentative
             return
 
-        flush_line()
-        if _measure_text(fragment, font) <= max_width:
-            current_line = fragment.lstrip()
-            return
+        if current_line:
+            flush_line()
+            fragment = fragment.lstrip()
+            if _measure_text(fragment, font) <= max_width:
+                current_line = fragment
+                return
+        else:
+            fragment = fragment.lstrip()
 
         for char in fragment:
             tentative = current_line + char

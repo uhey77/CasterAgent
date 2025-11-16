@@ -92,6 +92,104 @@ uv run uvicorn daily2video.app:app --reload
 
 生成されたファイルは `data/` 配下に保存され、YouTube へアップロードした場合は Slack 通知で共有リンクが送信されます。
 
+## アーキテクチャ概要
+- クリーンアーキテクチャを意識し、`domain`（抽象）、`application`（ユースケース）、`infrastructure`（各種 API 実装）が疎結合になるよう分離しています。
+- 設定は `AppSettings`（Pydantic BaseSettings）が一元管理し、`.env` と `config/*.json` を読み込みます。
+- 実行面では FastAPI からも CLI（`main.py`）からも同じユースケース `GenerateDailyVideo` を呼び出すため、インターフェースの差し替えが容易です。
+
+| レイヤー | 役割 | 主なモジュール |
+|----------|------|----------------|
+| `domain` | エンティティ (`Article`, `VideoAsset` 等) とインターフェース (`ScriptGenerator` など) を定義 | `src/daily2video/domain` |
+| `application` | ビジネスユースケース（パイプライン制御） | `application/use_cases/generate_daily_video.py` |
+| `infrastructure` | OpenAI/Google/esa/Hedra/Sync Labs/YouTube/Slack/ffmpeg との接続 | `infrastructure/clients`, `infrastructure/services` |
+| `presentation` | FastAPI のエンドポイントと DI | `presentation/api.py`, `presentation/dependencies.py` |
+
+## モジュール別概要
+- **core/settings (`src/daily2video/core/settings.py`)**: 環境変数を読み込み、`StoragePaths` で `data/` 配下のサブディレクトリを保証します。`get_settings()` は DI の起点です。
+- **domain/models & interfaces**: 記事メタデータ、スクリプト、音声、字幕、動画などパイプライン中間成果物を型安全に扱います。例: `VideoComposer` は `AudioAsset` と `SubtitleAsset` を受け取り `VideoAsset` を返します。
+- **application/services/pipeline_service.py**: 実行時に利用するコンクリート実装（OpenAI, Google TTS, Sync Labs, Hedra, MoviePy, Slack, YouTube）を条件付きで組み立て、`GenerateDailyVideo` に注入します。ここで API キーの有無に応じたフォールバック（例: Hedra→MoviePy）が決まります。
+- **application/use_cases/generate_daily_video.py**: 取得→生成→合成→通知→アップロードまでを逐次実行し、各ステップで `PipelineLogger` に JSON ログを書き込みます。YouTube の「1日1本」制限もここで管理し、`data/state/last_upload.json` に状態を保存します。
+- **infrastructure/services/topic_overlay.py**: esa 記事やスクリプトからトピックリスト画像を自動生成し、ffmpeg で動画にオーバーレイします。最新トピック一覧の文字詰まり防止ロジックもここで管理されます。
+- **tests/**: 代表的なユースケースと外部サービスのスタブテストを収録（例: `test_topic_overlay.py` は折り返し・レイアウトを検証）。
+
+## パイプライン詳細
+| ステージ | 入力 | 出力 | 主なクラス |
+|----------|------|------|-----------|
+| 記事取得 | esa API (`EsaRestClient`) | `Article` | `ArticleRepository` 実装 |
+| スクリプト生成 | `Article` | `ScriptAsset` | `OpenAIScriptService`（GPT-4o） |
+| 音声合成 | `ScriptAsset` | `AudioAsset` | `GoogleTextToSpeechService` |
+| 字幕生成 | `ScriptAsset`, `AudioAsset` | `SubtitleAsset` (SRT) | `OpenAISubtitleService`（Whisper API） |
+| メタデータ生成 | `Article`, `ScriptAsset` | `VideoMetadata` | `OpenAIScriptService` 再利用 |
+| 画像/トピック | `Article`, `ScriptAsset` | 背景 + トピック画像 | 画像生成（外部）+ `topic_overlay` |
+| 動画合成 | 音声/字幕/背景 | `VideoAsset` | MoviePy or Sync Labs/Hedra コンポーザー |
+| 通知 / 公開 | `VideoAsset`, `VideoMetadata` | Slack 通知, YouTube ID | `SlackNotifier`, `YouTubePublisher` |
+
+## 生成アセットと保存先
+- `data/scripts/{id}.txt`: OpenAI が生成した読み上げ用スクリプト
+- `data/audio/{id}.wav`: Google TTS 音声
+- `data/subtitles/{id}.srt`: 字幕
+- `data/images/{id}.png`: サムネイル・背景、`*_topics.png` はトピック一覧
+- `data/videos/{date}.mp4`: 合成後動画
+- `data/metadata/{date}.json`: YouTube 投稿用メタデータ
+- `data/state/last_upload.json`: 当日投稿済みかを記録
+
+## API / 実行方法（詳細）
+- **FastAPI**: `uv run uvicorn daily2video.app:app --reload` で起動。`POST /pipeline/run` に `{ "article_id": 201 }` のような JSON を送れば、その記事 ID で動画を生成します。未指定時は esa の最新記事を取得します。
+- **CLI 実行**: `uv run python -m daily2video.application.scripts.run_pipeline --article-id 201` のような開発用スクリプトを追加する場合も、`pipeline_service.build_pipeline_use_case()` を再利用すれば統一的に動作します（既定では `main.py` 経由で FastAPI を起動）。
+- **ロギング**: `src/daily2video/infrastructure/services/logging_service.py` が JSON 形式で標準出力や `server.log` に記録します。各イベントには `event` フィールドを付与しているため、`jq` での解析が容易です。
+
+## Google Cloud へのデプロイ
+`Dockerfile` と FastAPI エンドポイントをそのまま Cloud Run（fully managed）に載せる構成が最もシンプルです。以下は代表的な手順です。
+
+1. **プロジェクト設定と Artifact Registry の作成**
+   ```bash
+   gcloud config set project YOUR_PROJECT_ID
+   gcloud artifacts repositories create ai-daily \
+     --repository-format=docker --location=asia-northeast1 \
+     --description="AI Daily 2 Video images"
+   ```
+2. **コンテナのビルドと登録**
+   ```bash
+   gcloud builds submit --region=asia-northeast1 \
+     --tag asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/ai-daily/ai-daily2video:latest
+   ```
+3. **Cloud Run へデプロイ**
+   ```bash
+   gcloud run deploy ai-daily2video \
+     --image asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/ai-daily/ai-daily2video:latest \
+     --region asia-northeast1 \
+     --platform=managed \
+     --cpu=2 --memory=4Gi \
+     --timeout=900 \
+     --port=8080 \
+     --set-env-vars="OUTPUT_ROOT=/tmp/data" \
+     --no-allow-unauthenticated
+   ```
+   - `.env` の値は `--set-env-vars` で直接指定するか、[Secret Manager](https://cloud.google.com/secret-manager) に保存して `--update-secrets` で参照してください。
+   - ファイル生成先を Cloud Storage に置きたい場合は、`gcsfuse` 付きコンテナで `/tmp/data` の代わりにバケットをマウントします。
+
+### 3時間ごとの自動実行（Cloud Scheduler）
+1. Cloud Scheduler 用のサービスアカウント（例: `scheduler-ai-daily@...`）を作成し、`roles/run.invoker` を付与します。
+2. 以下のように HTTP ターゲットのジョブを作成します（3時間おき、JST ベース）。
+   ```bash
+   SERVICE_URL=$(gcloud run services describe ai-daily2video \
+     --region=asia-northeast1 --format='value(status.url)')
+
+   gcloud scheduler jobs create http ai-daily-run \
+     --schedule="0 */3 * * *" \
+     --time-zone="Asia/Tokyo" \
+     --http-method=POST \
+     --uri="${SERVICE_URL}/pipeline/run" \
+     --oidc-service-account-email="scheduler-ai-daily@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+     --oidc-token-audience="${SERVICE_URL}" \
+     --headers="Content-Type=application/json" \
+     --message-body='{}'
+   ```
+   `message-body` を `{"article_id": 201}` のようにすれば特定記事を指定できます。`{}` のままなら esa 最新記事が選ばれます。
+
+### デイリー投稿の重複防止
+`GenerateDailyVideo._should_upload_video` が `data/state/last_upload.json` を確認し、当日分が既にマークされていれば `already_uploaded_today` でアップロードをスキップします（`src/daily2video/application/use_cases/generate_daily_video.py:169-192`）。アップロード完了時は `_mark_uploaded_today()` が同ファイルを当日の日付で更新します（`src/daily2video/application/use_cases/generate_daily_video.py:224-248`）。Cloud Scheduler を 3 時間毎に動かしても、この仕組みが働くため当日1本を維持できます。
+
 ## テスト & Lint
 
 ```bash
