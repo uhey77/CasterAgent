@@ -189,6 +189,11 @@ uv run uvicorn daily2video.app:app --reload
 
 ### デイリー投稿の重複防止
 `GenerateDailyVideo._should_upload_video` が `data/state/last_upload.json` を確認し、当日分が既にマークされていれば `already_uploaded_today` でアップロードをスキップします（`src/daily2video/application/use_cases/generate_daily_video.py:169-192`）。アップロード完了時は `_mark_uploaded_today()` が同ファイルを当日の日付で更新します（`src/daily2video/application/use_cases/generate_daily_video.py:224-248`）。Cloud Scheduler を 3 時間毎に動かしても、この仕組みが働くため当日1本を維持できます。
+テストで重複投稿を試したい場合は、CLI から以下を実行してください。
+```bash
+uv run python -m daily2video.application.scripts.run_pipeline --force-upload --article-id 210
+```
+`--article-id` 未指定なら esa 最新記事を使います。`--force-upload` を付けなければ従来どおり重複チェックが働きます。
 
 ## テスト & Lint
 
@@ -208,7 +213,7 @@ CI やローカル開発中に外部 API へアクセスしたくない場合は
   リフレッシュトークンの失効が考えられます。Google Cloud Console 上で OAuth クライアントを再度承認し、新しい `GOOGLE_REFRESH_TOKEN` を `.env` に設定してください。Slack 通知にはエラー内容が含まれます。
 
 - **同じ日に複数回パイプラインを走らせたい**  
-  2回目以降の実行では `data/state/last_upload.json` を確認し、当日分が既に投稿済みなら YouTube アップロードと Slack 通知を自動でスキップします。どうしても再投稿したい場合はファイルを削除して再実行してください。
+ 2回目以降の実行では `data/state/last_upload.json` を確認し、当日分が既に投稿済みなら YouTube アップロードと Slack 通知を自動でスキップします。どうしても再投稿したい場合は `uv run python -m daily2video.application.scripts.run_pipeline --force-upload` を利用してください（旧来どおりファイル削除でも可）。
 
 - **背景生成やリップシンクを切り替えたい**  
   Sync Labs と Hedra の設定値は `config/` 配下の JSON で上書き可能です。環境変数の説明はコメントと README の該当セクションを参照してください。

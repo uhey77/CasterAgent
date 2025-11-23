@@ -181,6 +181,17 @@ def test_generate_daily_video_success(sample_article: Article) -> None:
     assert len(notifier.messages) == 1  # 通知は増えない
 
 
+def test_force_upload_allows_duplicate_post(sample_article: Article) -> None:
+    use_case, notifier = build_use_case(sample_article)
+    use_case.execute(GenerateDailyVideoInput())
+
+    result_force = use_case.execute(GenerateDailyVideoInput(force_upload=True))
+
+    assert result_force.status.status == "uploaded"
+    assert result_force.youtube_video_id == "youtube-video-id"
+    assert len(notifier.messages) == 2  # 強制実行でも通知される
+
+
 def test_generate_daily_video_missing_article() -> None:
     use_case, _ = build_use_case(None)
     with pytest.raises(PipelineError):

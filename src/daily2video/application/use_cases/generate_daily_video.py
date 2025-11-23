@@ -37,6 +37,7 @@ def _now_jst() -> datetime:
 @dataclass(slots=True)
 class GenerateDailyVideoInput:
     article_id: Optional[int] = None
+    force_upload: bool = False
 
 
 @dataclass(slots=True)
@@ -102,7 +103,9 @@ class GenerateDailyVideo:
             status.status = "video_ready"
             self._logger.log({"event": "video_composed", "file_path": str(video.file_path)})
 
-            should_upload, skip_reason = self._should_upload_video(article, metadata)
+            should_upload, skip_reason = self._should_upload_video(
+                article, metadata, force_upload=command.force_upload
+            )
             youtube_video_id = None
 
             if should_upload:
@@ -166,11 +169,17 @@ class GenerateDailyVideo:
             raise PipelineError("article", "対象の記事が見つかりませんでした")
         return article
 
-    def _should_upload_video(self, article: Article, metadata: VideoMetadata | None) -> tuple[bool, Optional[str]]:
+    def _should_upload_video(
+        self,
+        article: Article,
+        metadata: VideoMetadata | None,
+        *,
+        force_upload: bool = False,
+    ) -> tuple[bool, Optional[str]]:
         """メタデータのタイトル日付か記事日付に基づいてアップロード可否を判断"""
         current_date = _now_jst().date()
 
-        if self._has_uploaded_today():
+        if not force_upload and self._has_uploaded_today():
             return False, "already_uploaded_today"
 
         metadata_date = self._extract_metadata_date(metadata)
