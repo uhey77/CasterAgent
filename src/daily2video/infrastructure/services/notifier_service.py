@@ -5,13 +5,13 @@ from typing import Optional
 
 import requests
 
-from ...core.settings import get_settings
-from ...domain.interfaces import Notifier
+from ...core.settings import AppSettings
+from ...application.ports import Notifier
 
 
 class SlackNotifier(Notifier):
-    def __init__(self) -> None:
-        self._settings = get_settings()
+    def __init__(self, settings: AppSettings) -> None:
+        self._settings = settings
         self._logger = logging.getLogger("ai_daily2video.notifier")
 
     def notify(self, message: str, *, level: str = "info", extra: Optional[dict] = None) -> None:

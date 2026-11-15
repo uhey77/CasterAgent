@@ -1,66 +1,83 @@
 from __future__ import annotations
 
-from typing import List
+import subprocess
+import tempfile
+from pathlib import Path
 
-from moviepy.editor import AudioFileClip, ColorClip, CompositeVideoClip, TextClip
+from PIL import Image, ImageDraw, ImageFont
 
-from ...core.settings import get_settings
-from ...domain.interfaces import VideoComposer
+from ...core.settings import AppSettings
+from ...application.ports import VideoComposer
 from ...domain.models import AudioAsset, SubtitleFile, SubtitleSegment, VideoAsset
+from .ffmpeg_tools import audio_duration, ffmpeg
 from .topic_overlay import build_topic_overlay, overlay_topic_image
 
 
 class MoviePyVideoComposer(VideoComposer):
-    def __init__(self) -> None:
-        self._settings = get_settings()
+    """Compatibility name for the FFmpeg-backed video composer."""
 
-    def compose(
-        self,
-        audio: AudioAsset,
-        subtitles: SubtitleFile,
-    ) -> VideoAsset:
+    def __init__(self, settings: AppSettings) -> None:
+        self._settings = settings
+
+    def compose(self, audio: AudioAsset, subtitles: SubtitleFile) -> VideoAsset:
         temp_output_path = self._settings.storage.videos_dir / f"{audio.article_id}_temp.mp4"
         final_output_path = self._settings.storage.videos_dir / f"{audio.article_id}.mp4"
-
-        audio_clip = AudioFileClip(str(audio.file_path))
-        duration = audio_clip.duration
-        
-        # 背景は単色クリップで構築
-        background_clip = ColorClip(size=(1920, 1080), color=(15, 15, 20)).set_duration(duration)
-        
-        # 字幕クリップを生成
-        subtitle_clips = self._build_subtitle_clips(subtitles.segments, duration)
-        
-        # 全てのクリップを合成（トピックリストはFFmpegで後から追加）
-        all_clips = [background_clip] + subtitle_clips
-        video_clip = CompositeVideoClip(all_clips)
-        final_clip = video_clip.set_audio(audio_clip)
-
-        # まず一時ファイルとして動画を生成
-        final_clip.write_videofile(
-            str(temp_output_path),
-            codec="libx264",
-            audio_codec="aac",
-            fps=30,
-            bitrate="4000k",
-            threads=4,
-            temp_audiofile=str(temp_output_path.with_suffix(".temp.m4a")),
-            remove_temp=True,
-        )
-
-        audio_clip.close()
-        background_clip.close()
-        final_clip.close()
-        for clip in subtitle_clips:
-            clip.close()
+        duration = audio_duration(audio.file_path)
+        with tempfile.TemporaryDirectory(prefix="daily-video-") as directory:
+            caption_images = self._build_subtitle_images(
+                subtitles.segments, duration, Path(directory)
+            )
+            cmd = [
+                ffmpeg(),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c=0x0f0f14:s=1920x1080:r=30:d={duration}",
+                "-i",
+                str(audio.file_path),
+            ]
+            for image, _, _ in caption_images:
+                cmd.extend(["-loop", "1", "-i", str(image)])
+            filters = []
+            previous = "0:v"
+            for i, (_, start, end) in enumerate(caption_images):
+                output = f"v{i}"
+                filters.append(
+                    f"[{previous}][{i + 2}:v]overlay=0:880:enable='between(t,{start},{end})'[{output}]"
+                )
+                previous = output
+            if filters:
+                cmd.extend(["-filter_complex", ";".join(filters), "-map", f"[{previous}]"])
+            else:
+                cmd.extend(["-map", "0:v"])
+            cmd.extend(
+                [
+                    "-map",
+                    "1:a",
+                    "-t",
+                    str(duration),
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:v",
+                    "4000k",
+                    "-threads",
+                    "4",
+                    str(temp_output_path),
+                ]
+            )
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
 
         overlay_spec = build_topic_overlay(
-            self._settings,
-            audio.article_id,
-            subtitles.segments,
-            duration,
+            self._settings, audio.article_id, subtitles.segments, duration
         )
-
         if overlay_spec:
             try:
                 overlay_topic_image(temp_output_path, overlay_spec, final_output_path, duration)
@@ -70,72 +87,61 @@ class MoviePyVideoComposer(VideoComposer):
                 temp_output_path.rename(final_output_path)
         else:
             temp_output_path.rename(final_output_path)
+        return VideoAsset(
+            article_id=audio.article_id, file_path=final_output_path, duration_seconds=duration
+        )
 
-        return VideoAsset(article_id=audio.article_id, file_path=final_output_path, duration_seconds=duration)
-
-    def _build_subtitle_clips(self, segments: List[SubtitleSegment], duration: float):
-        clips = []
-        selected_font = self._get_font()
-        
-        if selected_font is None:
+    def _build_subtitle_images(
+        self, segments: list[SubtitleSegment], duration: float, directory: Path
+    ):
+        font_path = self._get_font()
+        if font_path is None:
             print("ERROR: 利用可能な日本語フォントが見つかりません")
             return []
-        
+        font = ImageFont.truetype(font_path, 60)
+        result = []
         for segment in segments:
-            start = max(segment.start_seconds, 0.0)
-            end = min(segment.end_seconds, duration)
+            start, end = max(segment.start_seconds, 0.0), min(segment.end_seconds, duration)
             if start >= end:
                 continue
-            text = segment.text.replace("\n", " ")
-            print(f"字幕作成中: {text[:30]}...")
-            
-            try:
-                clip = (
-                    TextClip(
-                        text,
-                        fontsize=60,
-                        font=selected_font,
-                        color="white",
-                        method="caption",
-                        size=(1600, None),
-                    )
-                    .on_color(
-                        size=(1920, 200),
-                        color=(0, 0, 0),
-                        col_opacity=0.8
-                    )
-                    .set_position(("center", "bottom"))
-                    .set_start(start)
-                    .set_end(end)
-                )
-                clips.append(clip)
-                print(f"字幕作成成功: {text[:20]}...")
-            except Exception as e:
-                print(f"字幕作成エラー: {text[:20]}... - {e}")
-                continue
-        
-        print(f"作成した字幕クリップ数: {len(clips)}")
-        return clips
+            image = Image.new("RGBA", (1920, 200), (0, 0, 0, 204))
+            draw = ImageDraw.Draw(image)
+            lines = []
+            line = ""
+            for char in segment.text.replace("\n", " "):
+                if line and draw.textlength(line + char, font=font) > 1600:
+                    lines.append(line)
+                    line = ""
+                line += char
+            if line:
+                lines.append(line)
+            text = "\n".join(lines)
+            box = draw.multiline_textbbox((0, 0), text, font=font, align="center", spacing=4)
+            width, height = box[2] - box[0], box[3] - box[1]
+            draw.multiline_text(
+                ((1920 - width) / 2, max(0, (200 - height) / 2) - box[1]),
+                text,
+                font=font,
+                fill="white",
+                align="center",
+                spacing=4,
+            )
+            path = directory / f"subtitle-{len(result)}.png"
+            image.save(path)
+            result.append((path, start, end))
+        return result
 
-
-    def _get_font(self):
-        """利用可能な日本語フォントを取得（字幕用）"""
-        font_candidates = [
+    def _get_font(self) -> str | None:
+        for font in [
             "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-            "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc", 
+            "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",
             "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
-            "/System/Library/AssetsV2/com_apple_MobileAsset_Font8/ee89e7987a76cc8cfdff36c96bd7bc77655b343e.asset/AssetData/YuGothic-Medium.otf",
-            None
-        ]
-        
-        for font in font_candidates:
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        ]:
             try:
-                test_clip = TextClip("テスト日本語", fontsize=20, font=font, color="white")
-                test_clip.close()
-                print(f"使用フォント: {font}")
+                ImageFont.truetype(font, 20)
                 return font
-            except Exception as e:
-                print(f"フォント '{font}' は使用できません: {e}")
+            except OSError:
                 continue
-        
         return None

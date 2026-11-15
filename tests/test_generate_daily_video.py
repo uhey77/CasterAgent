@@ -1,33 +1,37 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Iterable, Optional
 import tempfile
+from collections.abc import Iterable
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
-from daily2video.application.use_cases.generate_daily_video import (
-    GenerateDailyVideo,
-    GenerateDailyVideoInput,
-    _now_jst,
-)
-from daily2video.domain.interfaces import (
-    ArticleRepository,
+from daily2video.application.ports import (
     AudioSynthesizer,
+    Clock,
     MetadataGenerator,
+    MetadataStore,
     Notifier,
     PipelineLogger,
     ScriptGenerator,
     SubtitleGenerator,
+    ThumbnailGenerator,
+    UploadHistory,
     VideoComposer,
     VideoPublisher,
 )
+from daily2video.application.use_cases.generate_daily_video import (
+    GenerateDailyVideo,
+    GenerateDailyVideoInput,
+)
+from daily2video.domain.errors import ArticleNotFoundError, PipelineError
 from daily2video.domain.models import (
+    JST,
     Article,
     AudioAsset,
     DialogueSegment,
-    PipelineError,
+    PipelineStage,
     Script,
     ScriptLine,
     SubtitleFile,
@@ -35,11 +39,13 @@ from daily2video.domain.models import (
     VideoAsset,
     VideoMetadata,
 )
-from daily2video.core.settings import StoragePaths
+from daily2video.domain.repositories import ArticleRepository
+
+NOW = datetime(2026, 11, 15, 9, 0, tzinfo=JST)
 
 
 class FakeArticleRepo(ArticleRepository):
-    def __init__(self, article: Optional[Article]) -> None:
+    def __init__(self, article: Article | None) -> None:
         self._article = article
 
     def latest(self) -> Article | None:
@@ -110,6 +116,15 @@ class FakePublisher(VideoPublisher):
         return "youtube-video-id"
 
 
+class FakeThumbnailGenerator(ThumbnailGenerator):
+    def generate(self, article: Article, metadata: VideoMetadata, script: Script | None = None) -> Path:
+        temp_dir = Path(tempfile.mkdtemp(prefix="thumb-"))
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        path = temp_dir / "thumb.png"
+        path.write_text("thumbnail")
+        return path
+
+
 class MemoryLogger(PipelineLogger):
     def __init__(self) -> None:
         self.events: list[dict] = []
@@ -122,11 +137,38 @@ class MemoryLogger(PipelineLogger):
             self.log(payload)
 
 
+class MemoryMetadataStore(MetadataStore):
+    def __init__(self) -> None:
+        self.saved_titles: list[str] = []
+
+    def save(self, metadata: VideoMetadata) -> None:
+        self.saved_titles.append(metadata.title)
+
+
+class MemoryUploadHistory(UploadHistory):
+    def __init__(self) -> None:
+        self.days: set[date] = set()
+
+    def has_uploaded_on(self, day: date) -> bool:
+        return day in self.days
+
+    def mark_uploaded(self, day: date) -> None:
+        self.days.add(day)
+
+
+class FixedClock(Clock):
+    def __init__(self, now: datetime = NOW) -> None:
+        self.current = now
+
+    def now(self) -> datetime:
+        return self.current
+
+
 class MemoryNotifier(Notifier):
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
 
-    def notify(self, message: str, *, level: str = "info", extra: Optional[dict] = None) -> None:
+    def notify(self, message: str, *, level: str = "info", extra: dict | None = None) -> None:
         self.messages.append((level, message))
 
 
@@ -143,79 +185,111 @@ def sample_article() -> Article:
     )
 
 
-def build_use_case(article: Optional[Article]) -> tuple[GenerateDailyVideo, MemoryNotifier]:
-    storage_root = Path(tempfile.mkdtemp(prefix="ai-daily-test-"))
-    storage = StoragePaths(root=storage_root)
-    storage.ensure_directories()
-    notifier = MemoryNotifier()
-    use_case = GenerateDailyVideo(
-        article_repo=FakeArticleRepo(article),
-        script_generator=FakeScriptGenerator(),
-        audio_synthesizer=FakeAudioSynthesizer(),
-        subtitle_generator=FakeSubtitleGenerator(),
-        metadata_generator=FakeMetadataGenerator(),
-        video_composer=FakeVideoComposer(),
-        publisher=FakePublisher(),
-        logger=MemoryLogger(),
-        notifier=notifier,
-        storage=storage,
-    )
-    return use_case, notifier
+class Harness:
+    def __init__(self, article: Article | None, publisher: VideoPublisher | None = None) -> None:
+        self.notifier = MemoryNotifier()
+        self.logger = MemoryLogger()
+        self.metadata_store = MemoryMetadataStore()
+        self.upload_history = MemoryUploadHistory()
+        self.clock = FixedClock()
+        self.use_case = GenerateDailyVideo(
+            article_repo=FakeArticleRepo(article),
+            script_generator=FakeScriptGenerator(),
+            audio_synthesizer=FakeAudioSynthesizer(),
+            subtitle_generator=FakeSubtitleGenerator(),
+            metadata_generator=FakeMetadataGenerator(),
+            video_composer=FakeVideoComposer(),
+            thumbnail_generator=FakeThumbnailGenerator(),
+            publisher=publisher or FakePublisher(),
+            logger=self.logger,
+            notifier=self.notifier,
+            metadata_store=self.metadata_store,
+            upload_history=self.upload_history,
+            clock=self.clock,
+        )
+
+    def run(self, **kwargs):
+        return self.use_case.execute(GenerateDailyVideoInput(**kwargs))
+
+    def events(self) -> list[str]:
+        return [payload["event"] for payload in self.logger.events]
 
 
 def test_generate_daily_video_success(sample_article: Article) -> None:
-    use_case, notifier = build_use_case(sample_article)
-    result = use_case.execute(GenerateDailyVideoInput())
+    harness = Harness(sample_article)
+    result = harness.run()
 
-    assert result.status.status == "uploaded"
+    assert result.status.status is PipelineStage.UPLOADED
     assert result.video and result.video.file_path.name == "video.mp4"
-    assert result.metadata and result.metadata.title.startswith("AI Daily—")
-    assert _now_jst().strftime("%Y-%m-%d") in result.metadata.title
+    assert result.metadata and result.metadata.title == "AI Daily—2026-11-15"
     assert result.youtube_video_id == "youtube-video-id"
-    assert len(notifier.messages) == 1
+    assert result.metadata.thumbnail_path is not None
+    assert result.metadata.thumbnail_path.exists()
+    # タイトル確定時とサムネイル付与時の2回、変更後のメタデータが保存される
+    assert harness.metadata_store.saved_titles == ["AI Daily—2026-11-15"] * 2
+    assert harness.upload_history.days == {NOW.date()}
+    assert len(harness.notifier.messages) == 1
 
-    # 次の実行ではアップロードがスキップされること
-    result_second = use_case.execute(GenerateDailyVideoInput())
-    assert result_second.status.status == "video_saved"
+    # 同じ日の次の実行ではアップロードがスキップされること
+    result_second = harness.run()
+    assert result_second.status.status is PipelineStage.VIDEO_SAVED
     assert result_second.youtube_video_id is None
-    assert len(notifier.messages) == 1  # 通知は増えない
+    assert len(harness.notifier.messages) == 1  # 通知は増えない
+
+    # 日付が変われば再び投稿される
+    harness.clock.current = NOW + timedelta(days=1)
+    assert harness.run().status.status is PipelineStage.UPLOADED
 
 
 def test_generate_daily_video_missing_article() -> None:
-    use_case, _ = build_use_case(None)
-    with pytest.raises(PipelineError):
-        use_case.execute(GenerateDailyVideoInput())
+    harness = Harness(None)
+    with pytest.raises(ArticleNotFoundError) as excinfo:
+        harness.run()
+    assert isinstance(excinfo.value, PipelineError)
+    assert harness.events()[-1] == "pipeline_failed"
+    assert harness.notifier.messages == [("error", "AI-Daily動画の自動生成でエラーが発生しました")]
 
 
-def test_should_upload_video_allows_past_date(sample_article: Article) -> None:
-    use_case, _ = build_use_case(sample_article)
-    sample_article.published_at = datetime.now(timezone.utc) - timedelta(days=2)
-    should_upload, reason = use_case._should_upload_video(sample_article, None)  # pylint: disable=protected-access
-    assert should_upload
-    assert reason is None
+def test_future_dated_article_is_saved_but_not_uploaded(sample_article: Article) -> None:
+    sample_article.issue_date = NOW.date() + timedelta(days=1)
+    harness = Harness(sample_article)
+
+    result = harness.run()
+
+    assert result.status.status is PipelineStage.VIDEO_SAVED
+    assert result.video is not None  # 動画自体は生成して残す
+    assert result.youtube_video_id is None
+    assert harness.upload_history.days == set()
+    assert any("未来日" in note for note in result.status.notes)
+    skip_event = next(p for p in harness.logger.events if p["event"] == "upload_skipped")
+    assert skip_event["reason"] == "article_date_in_future"
+    assert skip_event["article_date"] == "2026-11-16"
+    assert len(harness.notifier.messages) == 1  # スキップしたことは通知する
+
+    # 記事の日付になれば投稿される
+    harness.clock.current = NOW + timedelta(days=1)
+    assert harness.run().status.status is PipelineStage.UPLOADED
 
 
-def test_should_upload_video_blocks_future_date(sample_article: Article) -> None:
-    use_case, _ = build_use_case(sample_article)
-    sample_article.published_at = datetime.now(timezone.utc) + timedelta(days=1)
-    should_upload, reason = use_case._should_upload_video(sample_article, None)  # pylint: disable=protected-access
-    assert not should_upload
-    assert reason == "article_date_in_future"
+def test_publisher_without_video_id_keeps_video_saved(sample_article: Article) -> None:
+    class LocalOnlyPublisher(VideoPublisher):
+        def publish(self, video: VideoAsset, metadata: VideoMetadata) -> str | None:
+            return None
+
+    harness = Harness(sample_article, publisher=LocalOnlyPublisher())
+    result = harness.run()
+
+    assert result.status.status is PipelineStage.VIDEO_SAVED
+    assert harness.upload_history.days == set()  # 投稿していないので記録しない
+    assert len(harness.notifier.messages) == 1
 
 
-def test_should_upload_video_allows_when_title_matches_today(sample_article: Article) -> None:
-    use_case, _ = build_use_case(sample_article)
-    now_jst = _now_jst()
-    sample_article.published_at = now_jst + timedelta(days=1)
-    today_str = now_jst.strftime("%Y-%m-%d")
-    metadata = VideoMetadata(
-        article_id=sample_article.article_id,
-        title=f"AI Daily—{today_str}",
-        description="desc",
-        tags=[],
-        category_id="28",
-        privacy_status="public",
-    )
-    should_upload, reason = use_case._should_upload_video(sample_article, metadata)  # pylint: disable=protected-access
-    assert should_upload
-    assert reason is None
+def test_force_upload_allows_duplicate_post(sample_article: Article) -> None:
+    harness = Harness(sample_article)
+    harness.run()
+
+    result_force = harness.run(force_upload=True)
+
+    assert result_force.status.status is PipelineStage.UPLOADED
+    assert result_force.youtube_video_id == "youtube-video-id"
+    assert len(harness.notifier.messages) == 2  # 強制実行でも通知される

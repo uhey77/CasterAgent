@@ -7,8 +7,8 @@ from typing import Iterable
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-from ...core.settings import get_settings
-from ...domain.interfaces import PipelineLogger
+from ...application.ports import PipelineLogger
+from ...core.settings import AppSettings
 
 
 class ConsolePipelineLogger(PipelineLogger):
@@ -24,8 +24,8 @@ class ConsolePipelineLogger(PipelineLogger):
 
 
 class GoogleSheetsPipelineLogger(PipelineLogger):  # pragma: no cover - network heavy
-    def __init__(self) -> None:
-        self._settings = get_settings()
+    def __init__(self, settings: AppSettings) -> None:
+        self._settings = settings
         if not self._settings.google_sheets_id:
             raise RuntimeError("Google Sheets ID is not configured")
         if not self._settings.google_drive_folder_id:
@@ -72,12 +72,11 @@ class CompositePipelineLogger(PipelineLogger):
             logger.bulk_log(payloads)
 
 
-def build_pipeline_logger() -> PipelineLogger:
-    settings = get_settings()
+def build_pipeline_logger(settings: AppSettings) -> PipelineLogger:
     loggers: list[PipelineLogger] = [ConsolePipelineLogger()]
     try:
         if settings.google_sheets_id:
-            loggers.append(GoogleSheetsPipelineLogger())
+            loggers.append(GoogleSheetsPipelineLogger(settings))
     except Exception as exc:
         logging.warning("Google Sheets logger disabled: %s", exc)
     return CompositePipelineLogger(*loggers)

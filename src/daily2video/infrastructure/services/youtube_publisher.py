@@ -15,16 +15,20 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
-from ...core.settings import get_settings
-from ...domain.interfaces import VideoPublisher
+from ...core.settings import AppSettings
+from ...application.ports import VideoPublisher
 from ...domain.models import VideoAsset, VideoMetadata
 
 
 class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
-    SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+    # youtube.upload でアップロード・サムネ設定は可能だが、サムネ権限エラーの回避のため youtube スコープも付与
+    SCOPES = [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube",
+    ]
     
-    def __init__(self) -> None:
-        self._settings = get_settings()
+    def __init__(self, settings: AppSettings) -> None:
+        self._settings = settings
         self._logger = logging.getLogger("ai_daily2video.youtube")
         self._credentials_path = Path("credentials/youtube_token.json")
         self._client_secrets_path = Path("credentials/youtube_client_secret.json")
@@ -47,7 +51,10 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
         }
         
         try:
-            return self._perform_upload(video.file_path, body)
+            youtube_id = self._perform_upload(video.file_path, body)
+            if youtube_id and metadata.thumbnail_path:
+                self._set_thumbnail(youtube_id, metadata.thumbnail_path)
+            return youtube_id
         except HttpError as exc:
             if self._is_signup_required(exc):
                 self._logger.warning(
@@ -75,6 +82,27 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
         youtube_id = response.get("id")
         self._logger.info("Video uploaded successfully: %s", youtube_id)
         return youtube_id
+
+    def _set_thumbnail(self, youtube_id: str, thumbnail_path: Path) -> None:
+        if not thumbnail_path or not thumbnail_path.exists():
+            self._logger.warning("Thumbnail file not found: %s", thumbnail_path)
+            return
+        try:
+            request = self._service.thumbnails().set(
+                videoId=youtube_id,
+                media_body=MediaFileUpload(str(thumbnail_path), mimetype="image/png"),
+            )
+            request.execute()
+            self._logger.info("Thumbnail uploaded successfully: %s", thumbnail_path)
+        except HttpError as exc:
+            detail = None
+            try:
+                detail = json.loads(exc.content.decode("utf-8"))
+            except Exception:
+                detail = str(exc)
+            self._logger.warning("Thumbnail upload failed: %s", detail)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._logger.warning("Thumbnail upload failed (unexpected): %s", exc)
 
     def _is_signup_required(self, exc: HttpError) -> bool:
         try:
@@ -142,6 +170,16 @@ class YouTubePublisher(VideoPublisher):  # pragma: no cover - network heavy
                 creds = Credentials.from_authorized_user_file(str(self._credentials_path), self.SCOPES)
             except Exception:
                 self._logger.warning("Stored YouTube token could not be parsed; re-running consent flow.")
+                self._credentials_path.unlink(missing_ok=True)
+                creds = None
+
+        # 既存トークンが新スコープを満たさない場合は再同意させる
+        if creds and creds.scopes:
+            missing = set(self.SCOPES) - set(creds.scopes or [])
+            if missing:
+                self._logger.warning(
+                    "Stored YouTube token missing scopes %s; re-running consent flow.", list(missing)
+                )
                 self._credentials_path.unlink(missing_ok=True)
                 creds = None
 

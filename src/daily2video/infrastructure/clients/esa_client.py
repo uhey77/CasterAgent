@@ -6,8 +6,8 @@ from typing import Any
 
 import requests
 
-from ...core.settings import get_settings
-from ...domain.interfaces import ArticleRepository
+from ...core.settings import AppSettings
+from ...domain.repositories import ArticleRepository
 from ...domain.models import Article
 
 
@@ -15,8 +15,8 @@ class EsaRestClient(ArticleRepository):
     BASE_URL = "https://api.esa.io/v1"
     PER_PAGE = 20
 
-    def __init__(self) -> None:
-        self._settings = get_settings()
+    def __init__(self, settings: AppSettings) -> None:
+        self._settings = settings
         if not self._settings.esa_api_token:
             raise RuntimeError("ESA API token is not configured")
         if not self._settings.esa_team:
@@ -94,6 +94,7 @@ class EsaRestClient(ArticleRepository):
             tags=raw.get("tags", []),
             url=raw.get("url"),
             published_at=parsed_published_at,
+            issue_date=self._extract_post_date(raw),
         )
         self._persist_article_markdown(article.article_id, article.markdown_body)
         return article

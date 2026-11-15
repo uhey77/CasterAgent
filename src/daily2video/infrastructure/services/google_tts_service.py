@@ -6,18 +6,18 @@ from pathlib import Path
 
 from google.api_core.exceptions import GoogleAPICallError, InvalidArgument
 from google.cloud import texttospeech
-from moviepy.editor import AudioFileClip, concatenate_audioclips
 
-from ...core.settings import get_settings
-from ...domain.interfaces import AudioSynthesizer
+from ...core.settings import AppSettings
+from ...application.ports import AudioSynthesizer
 from ...domain.models import AudioAsset, DialogueSegment, Script
+from .ffmpeg_tools import audio_duration, concatenate_audio
 
 
 class GoogleTextToSpeechService(AudioSynthesizer):
     """Google Cloud Text-to-Speech を用いた音声合成サービス。"""
 
-    def __init__(self) -> None:
-        self._settings = get_settings()
+    def __init__(self, settings: AppSettings) -> None:
+        self._settings = settings
         self._client = texttospeech.TextToSpeechClient()
 
     def synthesize(self, script: Script) -> AudioAsset:
@@ -37,8 +37,7 @@ class GoogleTextToSpeechService(AudioSynthesizer):
 
         attempt = 0
         audio_segments: list[tuple[str, str, str]] = []
-        clips: list[AudioFileClip] = []
-        combined_audio = None
+        durations: list[float] = []
         total_duration = -1.0
 
         while True:
@@ -47,9 +46,8 @@ class GoogleTextToSpeechService(AudioSynthesizer):
             if not audio_segments:
                 raise ValueError("No script lines with text were available for audio synthesis.")
 
-            clips = [AudioFileClip(segment_path) for segment_path, _, _ in audio_segments]
-            combined_audio = concatenate_audioclips(clips)
-            total_duration = combined_audio.duration if combined_audio.duration is not None else -1.0
+            durations = [audio_duration(segment_path) for segment_path, _, _ in audio_segments]
+            total_duration = sum(durations)
 
             within_range = total_duration > 0 and target_min <= total_duration <= target_max
             if within_range or attempt >= max_attempts:
@@ -68,24 +66,16 @@ class GoogleTextToSpeechService(AudioSynthesizer):
             if math.isclose(adjusted_speed, speech_speed, rel_tol=1e-2):
                 break
 
-            for clip in clips:
-                clip.close()
-            combined_audio.close()
             for segment_path, _, _ in audio_segments:
                 Path(segment_path).unlink()
 
             speech_speed = adjusted_speed
 
-        if combined_audio is None:
-            raise RuntimeError("Audio synthesis failed to produce a combined clip.")
-
-        combined_audio.write_audiofile(str(target_path))
-        total_duration = combined_audio.duration if combined_audio.duration is not None else -1.0
+        concatenate_audio([path for path, _, _ in audio_segments], target_path)
 
         dialogue_segments: list[DialogueSegment] = []
         cursor = 0.0
-        for clip, (_, speaker, text) in zip(clips, audio_segments):
-            duration = clip.duration if clip.duration is not None else 0.0
+        for duration, (_, speaker, text) in zip(durations, audio_segments, strict=True):
             start = cursor
             end = cursor + duration
             dialogue_segments.append(
@@ -93,9 +83,6 @@ class GoogleTextToSpeechService(AudioSynthesizer):
             )
             cursor = end
 
-        for clip in clips:
-            clip.close()
-        combined_audio.close()
         for segment_path, _, _ in audio_segments:
             Path(segment_path).unlink()
 

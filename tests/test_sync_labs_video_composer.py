@@ -72,7 +72,7 @@ def test_sync_labs_video_composer(tmp_path, monkeypatch):
         )
         client = StubSyncLabsClient()
         video_source = SyncVideoSource(url="https://example.com/template.mp4")
-        composer = SyncLabsVideoComposer(client, video_source)
+        composer = SyncLabsVideoComposer(client, video_source, get_settings())
 
         video_asset = composer.compose(audio_asset, subtitles)
 

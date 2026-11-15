@@ -57,7 +57,7 @@ class SyncLabsClient:
         api_key: str,
         base_url: str = "https://api.sync.so",
         poll_interval: float = 5.0,
-        poll_timeout: float = 900.0,
+        poll_timeout: float = 1200.0,
     ) -> None:
         if not api_key:
             raise ValueError("Sync Labs API key is required.")

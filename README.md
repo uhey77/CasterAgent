@@ -14,12 +14,13 @@ AI Daily 2 Video は、esa の「AI Daily」記事を読み上げ付きの動画
 
 ```
 src/daily2video/
-├── app.py                 # FastAPI エントリーポイント
-├── core/                  # 設定読み込み・共通コンポーネント
-├── domain/                # エンティティと抽象インターフェース
-├── application/           # ユースケース（パイプライン実装）
+├── app.py                 # FastAPI エントリーポイント（ルーターとユースケースを接続）
+├── composition.py         # Composition Root（具体実装を選んで組み立てる）
+├── core/                  # 設定読み込み
+├── domain/                # 業務モデル・業務ルール・エラー・記事リポジトリの契約
+├── application/           # ユースケースと、外部機能の契約（Port）
 ├── infrastructure/        # 外部サービス実装（OpenAI/Google/esa など）
-└── presentation/          # FastAPI ルーターや依存性注入
+└── presentation/          # FastAPI ルーター
 ```
 
 生成物はすべて `data/` 配下に保存されます（`scripts/`、`audio/`、`subtitles/`、`images/`、`videos/`、`metadata/`）。
@@ -93,22 +94,28 @@ uv run uvicorn daily2video.app:app --reload
 生成されたファイルは `data/` 配下に保存され、YouTube へアップロードした場合は Slack 通知で共有リンクが送信されます。
 
 ## アーキテクチャ概要
-- クリーンアーキテクチャを意識し、`domain`（抽象）、`application`（ユースケース）、`infrastructure`（各種 API 実装）が疎結合になるよう分離しています。
+- クリーンアーキテクチャに沿って、業務ルール（`domain`）、処理手順（`application`）、技術的な実現方法（`infrastructure`）を分離しています。
+- 依存方向は `presentation → application → domain`、`infrastructure → application / domain` です。具体実装を選ぶのは `composition.py` だけで、各クラスは必要な依存をコンストラクタで受け取ります（`get_settings()` を内部で呼びません）。
+- この依存ルールは `tests/test_architecture.py` が自動で検証します。
 - 設定は `AppSettings`（Pydantic BaseSettings）が一元管理し、`.env` と `config/*.json` を読み込みます。
 - 実行面では FastAPI からも CLI（`main.py`）からも同じユースケース `GenerateDailyVideo` を呼び出すため、インターフェースの差し替えが容易です。
 
 | レイヤー | 役割 | 主なモジュール |
 |----------|------|----------------|
-| `domain` | エンティティ (`Article`, `VideoAsset` 等) とインターフェース (`ScriptGenerator` など) を定義 | `src/daily2video/domain` |
-| `application` | ビジネスユースケース（パイプライン制御） | `application/use_cases/generate_daily_video.py` |
-| `infrastructure` | OpenAI/Google/esa/Hedra/Sync Labs/YouTube/Slack/ffmpeg との接続 | `infrastructure/clients`, `infrastructure/services` |
-| `presentation` | FastAPI のエンドポイントと DI | `presentation/api.py`, `presentation/dependencies.py` |
+| `domain` | エンティティ (`Article`, `VideoMetadata` 等)、アップロード可否の判定、業務エラー、`ArticleRepository` | `domain/models.py`, `domain/upload_policy.py`, `domain/errors.py`, `domain/repositories.py` |
+| `application` | ユースケース（パイプラインの手順）と Port (`ScriptGenerator`, `VideoPublisher`, `UploadHistory`, `Clock` など) | `application/use_cases/generate_daily_video.py`, `application/ports.py` |
+| `infrastructure` | OpenAI/Google/esa/Hedra/Sync Labs/YouTube/Slack/ffmpeg との接続、JSON ファイルへの状態保存 | `infrastructure/clients`, `infrastructure/services` |
+| `presentation` | FastAPI のエンドポイントと入出力の変換 | `presentation/api.py` |
+| Composition Root | 設定に応じた具体実装の選択と接続 | `composition.py`, `app.py` |
 
 ## モジュール別概要
-- **core/settings (`src/daily2video/core/settings.py`)**: 環境変数を読み込み、`StoragePaths` で `data/` 配下のサブディレクトリを保証します。`get_settings()` は DI の起点です。
-- **domain/models & interfaces**: 記事メタデータ、スクリプト、音声、字幕、動画などパイプライン中間成果物を型安全に扱います。例: `VideoComposer` は `AudioAsset` と `SubtitleAsset` を受け取り `VideoAsset` を返します。
-- **application/services/pipeline_service.py**: 実行時に利用するコンクリート実装（OpenAI, Google TTS, Sync Labs, Hedra, MoviePy, Slack, YouTube）を条件付きで組み立て、`GenerateDailyVideo` に注入します。ここで API キーの有無に応じたフォールバック（例: Hedra→MoviePy）が決まります。
-- **application/use_cases/generate_daily_video.py**: 取得→生成→合成→通知→アップロードまでを逐次実行し、各ステップで `PipelineLogger` に JSON ログを書き込みます。YouTube の「1日1本」制限もここで管理し、`data/state/last_upload.json` に状態を保存します。
+- **core/settings (`src/daily2video/core/settings.py`)**: 環境変数を読み込み、`StoragePaths` で `data/` 配下のサブディレクトリを保証します。`get_settings()` を呼ぶのは起動時の組み立て（`app.py` / `composition.py`）だけです。
+- **domain/models**: 記事メタデータ、スクリプト、音声、字幕、動画などパイプライン中間成果物を型安全に扱います。進行状態は `PipelineStage`、スキップ理由は `UploadSkipReason` で表します。
+- **domain/upload_policy.py**: 「1日1本」「記事の日付（記事名に書かれた日付、無ければ公開日）が未来なら投稿しない」というアップロード可否の判断を `decide_upload()` にまとめています。外部サービスなしでテストできます。
+- **application/ports.py**: ユースケースが必要とする外部機能の契約です。例: `VideoComposer` は `AudioAsset` と `SubtitleFile` を受け取り `VideoAsset` を返します。
+- **application/use_cases/generate_daily_video.py**: 取得→生成→合成→アップロード→通知までを逐次実行し、各ステップで `PipelineLogger` に JSON ログを書き込みます。投稿済みの記録は `UploadHistory`、現在時刻は `Clock` を通して扱います。
+- **composition.py**: 実行時に利用する具体実装（OpenAI, Google TTS, Sync Labs, Hedra, ffmpeg, Slack, YouTube）を条件付きで組み立て、`GenerateDailyVideo` に注入します。ここで API キーの有無に応じたフォールバック（Sync Labs→Hedra→ローカル ffmpeg）が決まります。
+- **infrastructure/services/upload_history.py / metadata_store.py**: `data/state/last_upload.json` と `data/metadata/*.json` への保存を担当します。
 - **infrastructure/services/topic_overlay.py**: esa 記事やスクリプトからトピックリスト画像を自動生成し、ffmpeg で動画にオーバーレイします。最新トピック一覧の文字詰まり防止ロジックもここで管理されます。
 - **tests/**: 代表的なユースケースと外部サービスのスタブテストを収録（例: `test_topic_overlay.py` は折り返し・レイアウトを検証）。
 
@@ -135,7 +142,7 @@ uv run uvicorn daily2video.app:app --reload
 
 ## API / 実行方法（詳細）
 - **FastAPI**: `uv run uvicorn daily2video.app:app --reload` で起動。`POST /pipeline/run` に `{ "article_id": 201 }` のような JSON を送れば、その記事 ID で動画を生成します。未指定時は esa の最新記事を取得します。
-- **CLI 実行**: `uv run python -m daily2video.application.scripts.run_pipeline --article-id 201` のような開発用スクリプトを追加する場合も、`pipeline_service.build_pipeline_use_case()` を再利用すれば統一的に動作します（既定では `main.py` 経由で FastAPI を起動）。
+- **CLI 実行**: `uv run python -m daily2video.application.scripts.run_pipeline --article-id 201` のような開発用スクリプトを追加する場合も、`daily2video.composition.build_generate_daily_video()` を再利用すれば統一的に動作します（既定では `main.py` 経由で FastAPI を起動）。
 - **ロギング**: `src/daily2video/infrastructure/services/logging_service.py` が JSON 形式で標準出力や `server.log` に記録します。各イベントには `event` フィールドを付与しているため、`jq` での解析が容易です。
 
 ## Google Cloud へのデプロイ
@@ -188,7 +195,17 @@ uv run uvicorn daily2video.app:app --reload
    `message-body` を `{"article_id": 201}` のようにすれば特定記事を指定できます。`{}` のままなら esa 最新記事が選ばれます。
 
 ### デイリー投稿の重複防止
-`GenerateDailyVideo._should_upload_video` が `data/state/last_upload.json` を確認し、当日分が既にマークされていれば `already_uploaded_today` でアップロードをスキップします（`src/daily2video/application/use_cases/generate_daily_video.py:169-192`）。アップロード完了時は `_mark_uploaded_today()` が同ファイルを当日の日付で更新します（`src/daily2video/application/use_cases/generate_daily_video.py:224-248`）。Cloud Scheduler を 3 時間毎に動かしても、この仕組みが働くため当日1本を維持できます。
+ユースケースが `UploadHistory`（実装は `JsonUploadHistory`、保存先は `data/state/last_upload.json`）で当日の投稿有無を確認し、`decide_upload()`（`src/daily2video/domain/upload_policy.py`）が投稿済みなら `already_uploaded_today` でアップロードを見送ります。アップロード完了時は `UploadHistory.mark_uploaded()` が同ファイルを当日の日付で更新します。Cloud Scheduler を 3 時間毎に動かしても、この仕組みが働くため当日1本を維持できます。
+テストで重複投稿を試したい場合は、CLI から以下を実行してください。
+```bash
+uv run python -m daily2video.application.scripts.run_pipeline --force-upload --article-id 210
+```
+`--article-id` 未指定なら esa 最新記事を使います。`--force-upload` を付けなければ従来どおり重複チェックが働きます。
+
+### サムネイル自動生成
+- 実行時に `data/images/{記事ID}_thumbnail.png` を生成し、「本日のトップ3」レイアウト（上段に日付、中央に3トピック、下段にAIアバター枠）を描画します。
+- esa記事の `###` 見出しから上位3件を抜粋し、足りない場合は汎用ワードで補完します。
+- YouTubeアップロード時に `thumbnail_path` が存在すれば自動でサムネイルとして設定します（認可済みのYouTube API資格情報が必要）。
 
 ## テスト & Lint
 
@@ -208,7 +225,7 @@ CI やローカル開発中に外部 API へアクセスしたくない場合は
   リフレッシュトークンの失効が考えられます。Google Cloud Console 上で OAuth クライアントを再度承認し、新しい `GOOGLE_REFRESH_TOKEN` を `.env` に設定してください。Slack 通知にはエラー内容が含まれます。
 
 - **同じ日に複数回パイプラインを走らせたい**  
-  2回目以降の実行では `data/state/last_upload.json` を確認し、当日分が既に投稿済みなら YouTube アップロードと Slack 通知を自動でスキップします。どうしても再投稿したい場合はファイルを削除して再実行してください。
+  2回目以降の実行では `data/state/last_upload.json` を確認し、当日分が既に投稿済みなら YouTube アップロードと Slack 通知を自動でスキップします。どうしても再投稿したい場合は `uv run python -m daily2video.application.scripts.run_pipeline --force-upload` を使うか、従来どおり state ファイルを削除して再実行してください。
 
 - **背景生成やリップシンクを切り替えたい**  
   Sync Labs と Hedra の設定値は `config/` 配下の JSON で上書き可能です。環境変数の説明はコメントと README の該当セクションを参照してください。

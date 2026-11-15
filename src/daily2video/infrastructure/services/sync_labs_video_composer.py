@@ -5,8 +5,8 @@ from pathlib import Path
 from sync.common.types.active_speaker import ActiveSpeaker
 from sync.common.types.generation_options import GenerationOptions
 
-from ...core.settings import get_settings
-from ...domain.interfaces import VideoComposer
+from ...core.settings import AppSettings
+from ...application.ports import VideoComposer
 from ...domain.models import AudioAsset, SubtitleFile, VideoAsset
 from ..clients.sync_labs_client import (
     SyncLabsClient,
@@ -19,10 +19,12 @@ from .topic_overlay import build_topic_overlay, overlay_topic_image
 class SyncLabsVideoComposer(VideoComposer):
     """Video composer that uploads audio to Sync Labs for lipsync rendering."""
 
-    def __init__(self, client: SyncLabsClient, video_source: SyncVideoSource) -> None:
+    def __init__(
+        self, client: SyncLabsClient, video_source: SyncVideoSource, settings: AppSettings
+    ) -> None:
         self._client = client
         self._video_source = video_source
-        self._settings = get_settings()
+        self._settings = settings
 
     def compose(self, audio: AudioAsset, subtitles: SubtitleFile) -> VideoAsset:
         options = self._build_generation_options()
