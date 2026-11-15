@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
-from ...core.settings import get_settings
-from ...domain.interfaces import VideoComposer
+from ...core.settings import AppSettings
+from ...application.ports import VideoComposer
 from ...domain.models import AudioAsset, DialogueSegment, SubtitleFile, VideoAsset
 from .topic_overlay import build_topic_overlay, overlay_topic_image
 from ..clients.hedra_client import HedraClient, HedraClientError
@@ -13,9 +13,9 @@ from ..clients.hedra_client import HedraClient, HedraClientError
 class HedraVideoComposer(VideoComposer):
     """Video composer that offloads avatar rendering to the Hedra API."""
 
-    def __init__(self, client: HedraClient) -> None:
+    def __init__(self, client: HedraClient, settings: AppSettings) -> None:
         self._client = client
-        self._settings = get_settings()
+        self._settings = settings
 
     def compose(self, audio: AudioAsset, subtitles: SubtitleFile) -> VideoAsset:
         avatar_id = self._primary_avatar_id()

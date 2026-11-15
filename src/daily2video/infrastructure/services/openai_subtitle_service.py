@@ -3,9 +3,10 @@ from __future__ import annotations
 import math
 from datetime import timedelta
 
-from ...core.openai_client import get_openai_client
-from ...core.settings import get_settings
-from ...domain.interfaces import SubtitleGenerator
+from openai import OpenAI
+
+from ...core.settings import AppSettings
+from ...application.ports import SubtitleGenerator
 from ...domain.models import AudioAsset, Script, SubtitleFile, SubtitleSegment
 
 
@@ -21,9 +22,9 @@ def _format_timestamp(seconds: float) -> str:
 
 
 class OpenAISubtitleService(SubtitleGenerator):
-    def __init__(self) -> None:
-        self._client = get_openai_client()
-        self._settings = get_settings()
+    def __init__(self, client: OpenAI, settings: AppSettings) -> None:
+        self._client = client
+        self._settings = settings
 
     def generate_subtitles(self, script: Script, audio: AudioAsset) -> SubtitleFile:
         with audio.file_path.open("rb") as handle:

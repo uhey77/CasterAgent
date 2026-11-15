@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from ...domain.interfaces import VideoPublisher
+from ...application.ports import VideoPublisher
 from ...domain.models import VideoAsset, VideoMetadata
 
 

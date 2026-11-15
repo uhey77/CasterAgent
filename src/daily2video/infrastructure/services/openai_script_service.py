@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import List, Tuple
 from datetime import datetime
 
-from ...core.openai_client import get_openai_client
-from ...core.settings import get_settings
-from ...domain.interfaces import MetadataGenerator, ScriptGenerator
+from openai import OpenAI
+
+from ...application.ports import MetadataGenerator, ScriptGenerator
+from ...core.settings import AppSettings
 from ...domain.models import Article, Script, ScriptLine, VideoMetadata
+from .metadata_store import write_metadata_file
 
 SCRIPT_SYSTEM_PROMPT = (
     "あなたはAIニュースを魅力的に伝える映像脚本家です。\n"
@@ -83,9 +85,9 @@ METADATA_USER_TEMPLATE = """
 
 
 class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
-    def __init__(self) -> None:
-        self._client = get_openai_client()
-        self._settings = get_settings()
+    def __init__(self, client: OpenAI, settings: AppSettings) -> None:
+        self._client = client
+        self._settings = settings
 
     def build_script(self, article: Article) -> Script:
         date_str = self._format_date(article.published_at)
@@ -193,15 +195,7 @@ class OpenAIScriptService(ScriptGenerator, MetadataGenerator):
 
     def _persist_metadata(self, metadata: VideoMetadata, article: Article) -> Path:
         path = self._settings.storage.metadata_dir / f"{article.article_id}.json"
-        payload = {
-            "title": metadata.title,
-            "description": metadata.description,
-            "tags": metadata.tags,
-            "category_id": metadata.category_id,
-            "privacy_status": metadata.privacy_status,
-            "language": metadata.language,
-        }
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_metadata_file(metadata, path)
         return path
 
     def _persist_script(self, script: Script) -> Path:

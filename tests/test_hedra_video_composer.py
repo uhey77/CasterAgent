@@ -56,7 +56,7 @@ def test_hedra_video_composer_builds_timeline(tmp_path, monkeypatch):
     get_settings.cache_clear()  # ensure environment overrides are picked up
     try:
         client = StubHedraClient()
-        composer = HedraVideoComposer(client)
+        composer = HedraVideoComposer(client, get_settings())
 
         audio_path = tmp_path / "audio.mp3"
         audio_path.write_bytes(b"\x00\x00")

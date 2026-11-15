@@ -150,7 +150,7 @@ class AppSettings(BaseSettings):
     sync_labs_sync_mode: str = Field(default="cut_off", alias="SYNC_LABS_SYNC_MODE")
     sync_labs_active_speaker: bool = Field(default=False, alias="SYNC_LABS_ACTIVE_SPEAKER")
     sync_labs_poll_interval_seconds: float = Field(default=5.0, alias="SYNC_LABS_POLL_INTERVAL_SECONDS")
-    sync_labs_poll_timeout_seconds: float = Field(default=900.0, alias="SYNC_LABS_POLL_TIMEOUT_SECONDS")
+    sync_labs_poll_timeout_seconds: float = Field(default=1200.0, alias="SYNC_LABS_POLL_TIMEOUT_SECONDS")
     sync_labs_temperature: float | None = Field(default=None, alias="SYNC_LABS_TEMPERATURE")
     sync_labs_occlusion_detection_enabled: bool = Field(
         default=False, alias="SYNC_LABS_OCCLUSION_DETECTION"

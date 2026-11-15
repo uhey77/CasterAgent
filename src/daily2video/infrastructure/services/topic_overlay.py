@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ...core.settings import AppSettings
 from ...domain.models import SubtitleSegment
+from .ffmpeg_tools import ffmpeg
 
 
 @dataclass
@@ -65,7 +66,7 @@ def overlay_topic_image(
     )
 
     base_cmd = [
-        "ffmpeg",
+        ffmpeg(),
         "-i",
         str(input_video),
         "-i",
@@ -126,7 +127,7 @@ def _probe_video_dimensions(video_path: Path) -> Tuple[int, int]:
             height = int(stream.get("height", 0))
             if width > 0 and height > 0:
                 return width, height
-    except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError):
+    except (FileNotFoundError, subprocess.CalledProcessError, json.JSONDecodeError, ValueError):
         pass
     return 1920, 1080
 
